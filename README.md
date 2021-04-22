@@ -46,11 +46,13 @@ unsigned int):
 Pass any of the above as an optional to detect if it was omitted:
 
     var first_name: ?[]const u8 = null;
-    var age: ?u8 = 0;
+    var age: ?u8 = null;
     
     try opts.flag("first-name", 'f', &first_name);
     try opts.flag("age", 'a', &age);
-    
+
+    opts.parseOrDie();
+
     if (first_name) |n| {
         // User passed in a first name
     }
