@@ -90,7 +90,7 @@ pub fn deinit(self: *ZOpts) void {
     }
 }
 
-pub fn printUsage(self: *ZOpts, writer: anytype) !void {
+pub fn printHelp(self: *ZOpts, writer: anytype) !void {
     if (self.last_error) |msg| {
         try writer.print("error: {s}\n\n", .{msg});
     }
@@ -199,9 +199,9 @@ fn printArgUsage(self: *ZOpts, arg_name: []const u8, arg_desc: []const u8, write
     }
 }
 
-pub fn printUsageAndDie(self: *ZOpts) noreturn {
+pub fn printHelpAndDie(self: *ZOpts) noreturn {
     const stderr = std.io.getStdErr().writer();
-    self.printUsage(stderr) catch {};
+    self.printHelp(stderr) catch {};
     std.process.exit(1);
 }
 
@@ -270,6 +270,10 @@ pub fn extraDecl(self: *ZOpts, comptime extras_name: []const u8, ptr: *[][]const
         .description = description,
         .ptr = ptr,
     };
+}
+
+pub fn parseOrDie(self: *ZOpts) void {
+    self.parse() catch |_| self.printHelpAndDie();
 }
 
 pub fn parse(self: *ZOpts) !void {
