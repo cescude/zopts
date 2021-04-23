@@ -26,8 +26,7 @@ values: std.ArrayList([]const u8), // Backing array for string arguments
 flags: std.ArrayList(FlagDefinition), // List of argument patterns
 args: std.ArrayList(PositionalDefinition),
 
-positionals: std.ArrayList([]const u8), // Backing array for all positional arguments
-positional_extras: ?ExtrasDefinition = null, // Used if we need to capture the positionals that trail args
+positional_extras: ?ExtrasDefinition = null, // Used if we need to capture the extra arguments that trail args
 
 last_error: ?[]const u8 = null,
 
@@ -65,7 +64,6 @@ pub fn init(allocator: *std.mem.Allocator) ZOpts {
     return .{
         .allocator = allocator,
         .values = std.ArrayList([]const u8).init(allocator),
-        .positionals = std.ArrayList([]const u8).init(allocator),
         .flags = std.ArrayList(FlagDefinition).init(allocator),
         .args = std.ArrayList(PositionalDefinition).init(allocator),
     };
@@ -77,17 +75,57 @@ pub fn deinit(self: *ZOpts) void {
     }
     self.values.deinit();
 
-    for (self.positionals.items) |str| {
-        self.allocator.free(str);
-    }
-    self.positionals.deinit();
-
     self.flags.deinit();
     self.args.deinit();
 
     if (self.last_error) |msg| {
         self.allocator.free(msg);
     }
+}
+
+/// Frees up all unnecessary memory and returns the backing memory for the
+/// caller to free:
+///
+///     var backing = zopts.toOwnedSlice();
+///     for (backing) |ptr| {
+///         your_allocator.free(ptr);
+///     }
+///     your_allocator.free(backing);
+///
+/// Use this when you do option parsing in a function, and need to keep the
+/// backing memory defined, eg:
+///
+///     const Config = struct{
+///         // ...
+///     };
+///
+///     fn myParser() !struct{ data: [][]const u8, cfg: Config } {
+///         var zopts = ZOpts.init(std.heap.page_allocator);
+///         defer zopts.deinit();
+///
+///         var cfg = Config{};
+///
+///         // ... declare and parse your options here ...
+///
+///         var result = .{
+///             .data = zopts.toOwnedSlice(),
+///             .cfg = cfg,
+///         };
+///
+///         return result;
+///     }
+pub fn toOwnedSlice(self: *ZOpts) [][]const u8 {
+    var allocator = self.allocator;
+    var backing_data = self.values.toOwnedSlice();
+
+    self.flags.deinit();
+    self.args.deinit();
+    if (self.last_error) |msg| {
+        allocator.free(msg);
+    }
+
+    self.* = init(allocator);
+    return backing_data;
 }
 
 pub fn printHelp(self: *ZOpts, writer: anytype) !void {
@@ -306,16 +344,19 @@ const Action = enum {
 
 pub fn parseSlice(self: *ZOpts, argv: [][]const u8) Error!void {
     var no_more_flags = false;
+    var num_positionals: usize = 0;
+    var extras_start_idx: ?usize = null;
 
     var idx: usize = 0;
     while (idx < argv.len) : (idx += 1) {
         var token = argv[idx];
 
         if (no_more_flags) {
-            try self.addPositional(token); // TODO: needs test case
+            try self.addPositional(token, num_positionals); // TODO: needs test case
+            num_positionals += 1;
         } else {
             if (std.mem.eql(u8, token, "--")) {
-                no_more_flags = true;
+                no_more_flags = true; // TODO: needs test case
             } else if (std.mem.startsWith(u8, token, "--")) {
                 const action = try self.fillLongValue(token[2..], argv[idx + 1 ..]);
                 switch (action) {
@@ -324,7 +365,8 @@ pub fn parseSlice(self: *ZOpts, argv: [][]const u8) Error!void {
                     .SkipNextToken => idx += 1, // we used argv[idx+1] for the value
                 }
             } else if (std.mem.eql(u8, token, "-")) {
-                try self.addPositional(token); // TODO: needs test case
+                try self.addPositional(token, num_positionals); // TODO: needs test case
+                num_positionals += 1;
                 no_more_flags = true;
             } else if (std.mem.startsWith(u8, token, "-")) {
 
@@ -344,35 +386,38 @@ pub fn parseSlice(self: *ZOpts, argv: [][]const u8) Error!void {
                     }
                 }
             } else {
-                try self.addPositional(token); // TODO: needs test case
+                try self.addPositional(token, num_positionals); // TODO: needs test case
+                num_positionals += 1;
                 no_more_flags = true;
             }
+        }
+
+        if (num_positionals == self.args.items.len) {
+            extras_start_idx = self.values.items.len;
         }
     }
 
     if (self.positional_extras) |defn| {
-        const num_posns = self.positionals.items.len;
-        const num_args = self.args.items.len;
-
-        if (num_args <= num_posns) {
-            defn.ptr.* = self.positionals.items[num_args..];
+        if (extras_start_idx) |extras_idx| {
+            defn.ptr.* = self.values.items[extras_idx..];
         } else {
-            defn.ptr.* = self.positionals.items[0..0];
+            defn.ptr.* = self.values.items[0..0];
         }
     }
 }
 
-fn addPositional(self: *ZOpts, value: []const u8) !void {
-    if (self.args.items.len > self.positionals.items.len) {
-        var defn = self.args.items[self.positionals.items.len];
+fn addPositional(self: *ZOpts, value: []const u8, arg_idx: usize) !void {
+    if (arg_idx < self.args.items.len) {
+        // We have a definition for this positional! Convert directly.
+        var defn = self.args.items[arg_idx];
 
         const dup_value = try self.allocator.dupe(u8, value);
         errdefer self.allocator.free(dup_value);
 
         try defn.conv.conv_fn(defn.conv.ptr, dup_value);
-        try self.positionals.append(dup_value);
+        try self.values.append(dup_value);
     } else if (self.positional_extras) |_| {
-        try self.positionals.append(try self.allocator.dupe(u8, value));
+        try self.values.append(try self.allocator.dupe(u8, value));
     } else {
         // We've received an arg but ran out of arg bindings, and also
         // don't have a positional_extras.ptr to bind it to.
@@ -986,4 +1031,49 @@ test "Subcommand template" {
     } else {
         expect(false);
     }
+}
+
+test "Using toOwnedSlice to parse in a function" {
+    const Config = struct {
+        arg0: []const u8 = "",
+        arg1: []const u8 = "",
+        extras: [][]const u8 = undefined,
+    };
+
+    const impl = struct {
+        pub fn getOpts() !struct { cfg: Config, data: [][]const u8 } {
+            var zopts = ZOpts.init(std.testing.allocator);
+            defer zopts.deinit();
+
+            var cfg = Config{};
+
+            try zopts.flag("arg0", null, &cfg.arg0);
+            try zopts.arg(&cfg.arg1);
+            try zopts.extra(&cfg.extras);
+
+            var argv = [_][]const u8{ "--arg0=one", "two", "three", "four" };
+            try zopts.parseSlice(argv[0..]);
+
+            var result = .{
+                .cfg = cfg,
+                .data = zopts.toOwnedSlice(),
+            };
+
+            return result;
+        }
+    };
+
+    var opts = try impl.getOpts();
+    defer {
+        for (opts.data) |ptr| {
+            std.testing.allocator.free(ptr);
+        }
+        std.testing.allocator.free(opts.data);
+    }
+
+    expectEqualStrings("one", opts.cfg.arg0);
+    expectEqualStrings("two", opts.cfg.arg1);
+    expect(opts.cfg.extras.len == 2);
+    expectEqualStrings("three", opts.cfg.extras[0]);
+    expectEqualStrings("four", opts.cfg.extras[1]);
 }
