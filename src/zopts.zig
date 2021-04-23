@@ -1,4 +1,3 @@
-// TODO: Add a readme or something
 // TODO: try to figure out the width of the terminal or whatever
 const std = @import("std");
 
@@ -23,10 +22,9 @@ values: std.ArrayList([]const u8), // Backing array for string arguments
 // ...so, take "grep": the first positional argument is the pattern, the
 // remaining arguments are which files to search.
 
-flags: std.ArrayList(FlagDefinition), // List of argument patterns
-args: std.ArrayList(PositionalDefinition),
-
-positional_extras: ?ExtrasDefinition = null, // Used if we need to capture the extra arguments that trail args
+flag_definitions: std.ArrayList(FlagDefinition),
+arg_definitions: std.ArrayList(PositionalDefinition),
+extras_definition: ?ExtrasDefinition = null, // Used if we need to capture the extra arguments that trail args
 
 last_error: ?[]const u8 = null,
 
@@ -64,8 +62,8 @@ pub fn init(allocator: *std.mem.Allocator) ZOpts {
     return .{
         .allocator = allocator,
         .values = std.ArrayList([]const u8).init(allocator),
-        .flags = std.ArrayList(FlagDefinition).init(allocator),
-        .args = std.ArrayList(PositionalDefinition).init(allocator),
+        .flag_definitions = std.ArrayList(FlagDefinition).init(allocator),
+        .arg_definitions = std.ArrayList(PositionalDefinition).init(allocator),
     };
 }
 
@@ -75,8 +73,8 @@ pub fn deinit(self: *ZOpts) void {
     }
     self.values.deinit();
 
-    self.flags.deinit();
-    self.args.deinit();
+    self.flag_definitions.deinit();
+    self.arg_definitions.deinit();
 
     if (self.last_error) |msg| {
         self.allocator.free(msg);
@@ -118,8 +116,8 @@ pub fn toOwnedSlice(self: *ZOpts) [][]const u8 {
     var allocator = self.allocator;
     var backing_data = self.values.toOwnedSlice();
 
-    self.flags.deinit();
-    self.args.deinit();
+    self.flag_definitions.deinit();
+    self.arg_definitions.deinit();
     if (self.last_error) |msg| {
         allocator.free(msg);
     }
@@ -139,15 +137,15 @@ pub fn printHelp(self: *ZOpts, writer: anytype) !void {
         try writer.print("usage: TODO ", .{});
     }
 
-    if (self.flags.items.len > 0) {
+    if (self.flag_definitions.items.len > 0) {
         try writer.print("[OPTIONS]... ", .{});
     }
 
-    for (self.args.items) |a| {
+    for (self.arg_definitions.items) |a| {
         try writer.print("{s} ", .{a.name});
     }
 
-    if (self.positional_extras) |defn| {
+    if (self.extras_definition) |defn| {
         try writer.print("{s}...", .{defn.name});
     }
 
@@ -164,11 +162,11 @@ pub fn printHelp(self: *ZOpts, writer: anytype) !void {
 
     try writer.print("\n", .{});
 
-    if (self.flags.items.len > 0) {
+    if (self.flag_definitions.items.len > 0) {
         try writer.print("OPTIONS\n", .{});
     }
 
-    for (self.flags.items) |defn| {
+    for (self.flag_definitions.items) |defn| {
         var spec_line = try specStringAlloc(self.allocator, defn.long_name, defn.short_name, defn.val_name);
         defer self.allocator.free(spec_line);
         try self.printArgUsage(spec_line, defn.description, writer);
@@ -176,15 +174,15 @@ pub fn printHelp(self: *ZOpts, writer: anytype) !void {
 
     try writer.print("\n", .{});
 
-    if (self.args.items.len > 0) {
+    if (self.arg_definitions.items.len > 0) {
         try writer.print("ARGS\n", .{});
     }
 
-    for (self.args.items) |arg_defn| {
+    for (self.arg_definitions.items) |arg_defn| {
         try self.printArgUsage(arg_defn.name, arg_defn.description, writer);
     }
 
-    if (self.positional_extras) |defn| {
+    if (self.extras_definition) |defn| {
         try self.printArgUsage(defn.name, defn.description, writer);
     }
 }
@@ -275,7 +273,7 @@ pub fn flagDecl(self: *ZOpts, comptime long_name: ?[]const u8, comptime short_na
     const is_bool = @TypeOf(ptr) == *bool or @TypeOf(ptr) == *?bool;
     const conv = FlagConverter.init(ptr);
 
-    try self.flags.append(.{
+    try self.flag_definitions.append(.{
         .long_name = long_name,
         .short_name = short_name,
         .val_name = val_desc orelse conv.tag,
@@ -290,7 +288,7 @@ pub fn arg(self: *ZOpts, ptr: anytype) !void {
 }
 
 pub fn argDecl(self: *ZOpts, comptime arg_name: []const u8, ptr: anytype, comptime description: []const u8) !void {
-    try self.args.append(.{
+    try self.arg_definitions.append(.{
         .name = arg_name, // TODO: Should we piggyback on conv.tag at all?
         .description = description,
         .conv = FlagConverter.init(ptr),
@@ -303,7 +301,7 @@ pub fn extra(self: *ZOpts, ptr: *[][]const u8) !void {
 }
 
 pub fn extraDecl(self: *ZOpts, comptime extras_name: []const u8, ptr: *[][]const u8, comptime description: []const u8) !void {
-    self.positional_extras = .{
+    self.extras_definition = .{
         .name = extras_name,
         .description = description,
         .ptr = ptr,
@@ -392,12 +390,12 @@ pub fn parseSlice(self: *ZOpts, argv: [][]const u8) Error!void {
             }
         }
 
-        if (num_positionals == self.args.items.len) {
+        if (num_positionals == self.arg_definitions.items.len) {
             extras_start_idx = self.values.items.len;
         }
     }
 
-    if (self.positional_extras) |defn| {
+    if (self.extras_definition) |defn| {
         if (extras_start_idx) |extras_idx| {
             defn.ptr.* = self.values.items[extras_idx..];
         } else {
@@ -407,20 +405,20 @@ pub fn parseSlice(self: *ZOpts, argv: [][]const u8) Error!void {
 }
 
 fn addPositional(self: *ZOpts, value: []const u8, arg_idx: usize) !void {
-    if (arg_idx < self.args.items.len) {
+    if (arg_idx < self.arg_definitions.items.len) {
         // We have a definition for this positional! Convert directly.
-        var defn = self.args.items[arg_idx];
+        var defn = self.arg_definitions.items[arg_idx];
 
         const dup_value = try self.allocator.dupe(u8, value);
         errdefer self.allocator.free(dup_value);
 
         try defn.conv.conv_fn(defn.conv.ptr, dup_value);
         try self.values.append(dup_value);
-    } else if (self.positional_extras) |_| {
+    } else if (self.extras_definition) |_| {
         try self.values.append(try self.allocator.dupe(u8, value));
     } else {
         // We've received an arg but ran out of arg bindings, and also
-        // don't have a positional_extras.ptr to bind it to.
+        // don't have a extras_definition.ptr to bind it to.
         try self.setError("Unexpected argument \"{s}\"", .{value});
         return error.ParseError;
     }
@@ -428,7 +426,7 @@ fn addPositional(self: *ZOpts, value: []const u8, arg_idx: usize) !void {
 
 fn fillLongValue(self: *ZOpts, token: []const u8, remainder: [][]const u8) !Action {
     var flag_name = extractName(token);
-    var defn: FlagDefinition = getFlagByLongName(self.flags.items, flag_name) orelse {
+    var defn: FlagDefinition = getFlagByLongName(self.flag_definitions.items, flag_name) orelse {
         try self.setError("Unrecognized option \"--{s}\"", .{flag_name});
         return error.ParseError;
     };
@@ -491,7 +489,7 @@ fn fillLongValue(self: *ZOpts, token: []const u8, remainder: [][]const u8) !Acti
 
 fn fillShortValue(self: *ZOpts, token: []const u8, remainder: [][]const u8) !Action {
     var flag_name = token[0];
-    var defn: FlagDefinition = getFlagByShortName(self.flags.items, flag_name) orelse {
+    var defn: FlagDefinition = getFlagByShortName(self.flag_definitions.items, flag_name) orelse {
         try self.setError("Unrecognized option \"-{c}\"", .{flag_name});
         return error.ParseError;
     };
