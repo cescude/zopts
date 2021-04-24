@@ -1075,3 +1075,56 @@ test "Using toOwnedSlice to parse in a function" {
     expectEqualStrings("three", opts.cfg.extras[0]);
     expectEqualStrings("four", opts.cfg.extras[1]);
 }
+
+test "Grep Example" {
+    const Config = struct {
+        context: u32 = 3,
+        ignore_case: bool = false,
+        color: enum { On, Off, Auto } = .Auto,
+
+        pattern: ?[]const u8 = null, // Optional, because we need to see if it was specified
+        files: [][]const u8 = undefined,
+    };
+
+    const defs = struct {
+        pub fn parseOpts(allocator: *std.mem.Allocator) !struct { cfg: Config, data: [][]const u8 } {
+            var zopts = ZOpts.init(allocator);
+            defer zopts.deinit();
+
+            var cfg = Config{};
+
+            zopts.programName("grep");
+            zopts.summary(
+                \\An example "grep" program illustrating various option types as
+                \\a means to show real usage of the ZOpts package.
+            );
+
+            try zopts.flagDecl("context", 'C', &cfg.context, "NUM", "Number of lines of context to include (default is 3).");
+            try zopts.flagDecl("ignore-case", 'i', &cfg.ignore_case, null, "Enable case insensitive search.");
+            try zopts.flagDecl("color", null, &cfg.color, null, "Colorize the output (default is Auto).");
+
+            var show_help = false;
+            try zopts.flagDecl("help", 'h', &show_help, null, "Display this help message");
+
+            try zopts.argDecl("PATTERN", &cfg.pattern, "Pattern to search on.");
+            try zopts.extraDecl("[FILE]", &cfg.files, "Files to search. Omit for stdin.");
+
+            //zopts.parseOrDie();
+            var argv = [_][]const u8{"-h"};
+            try zopts.parseSlice(argv[0..]);
+
+            if (show_help) {
+                zopts.printHelpAndDie();
+            }
+
+            var result = .{
+                .cfg = cfg,
+                .data = zopts.toOwnedSlice(),
+            };
+
+            return result;
+        }
+    };
+
+    var opts = try defs.parseOpts(std.testing.allocator);
+}
