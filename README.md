@@ -1,10 +1,21 @@
 # Command Line parsing with ZOpts
 
 ZOpts is a zig library for parsing commandline flags. It's primary goal is to be
-easy to use without relying on too much magic, leaning on zig's language
-features to perform the work.
+easy to use without relying on too much magic (ie. there's no DSL, the API
+consists solely of discoverable functions). Additionally, it leans on Zig's
+static typing to aid with flag definitions.
+
+## Features
+
+* Declarative API makes it clear which options are defined before parsing
+* Supports boolean, string, and positional type arguments 
+* Bind bool, []const u8, int, and enum variables directly to an argument
+* Test for the presence of a flag by binding an optional
+* Default values are specified by initializing your variable
+* Specialized help/usage generation for your program
+* Support subcommands by binding an enum to a positional
  
-# Synopsis
+## Synopsis
 
 Basic setup & use:
 
@@ -78,33 +89,33 @@ Declaring positional arguments:
 Capturing any extra positional arguments:
 
     var extra: [][]const u8 = undefined;
-    
     try opts.extra(&extra);
 
-To provide usage information for the help string, use `flagDecl` and `argDecl`,
-rather than just `flag` or `arg` (respectively). This will give more context
-when printing usage information.
+To provide extra information for the help string, use `flagDecl` and `argDecl`,
+rather than just `flag` or `arg` (respectively). This gives more context when
+printing usage information.
 
     var name: []const u8 = "";
     var file: []const u8 = "";
     
     try opts.flagDecl("name", 'n', &name, "NAME", "Name of the user running a query");
     try opts.argDecl("file", 'f', &file, "INPUT", "File name containing data");
-    
+
 ## Case example "grep"
 
 Here's the help string for a fictional implementation of grep:
 
-    usage: grep [OPTIONS]... PATTERN [FILE]...
+    ~/code/zig/grep $ grep -h
+    usage: grep [OPTIONS] PATTERN [FILE]...
     An example "grep" program illustrating various option types as a means to show
     real usage of the ZOpts package.
     
     OPTIONS
-       -C, --context=NUM         Number of lines of context to include (default is
-                                 3).
+       -C, --context=LINES       Number of lines of context to include before and
+                                 after a match (default is 3).
        -i, --ignore-case         Enable case insensitive search.
-           --color=[On|Off|Auto] Colorize the output (default is Auto).
-       -h, --help                Display this help message
+           --color=(On|Off|Auto) Colorize the output (default is Auto).
+       -h, --help                Display this help message.
     
     ARGS
        PATTERN                   Pattern to search on.
@@ -112,34 +123,64 @@ Here's the help string for a fictional implementation of grep:
 
 This can be implemented w/ ZOpts as follows:
 
+    const Config = struct {
+        context: u32 = 3,
+        ignore_case: bool = false,
+        color: enum { On, Off, Auto } = .Auto,
+
+        pattern: ?[]const u8 = null, // Optional, because we need to see if it was specified
+        files: [][]const u8 = undefined,
+    };
+
     fn parseOpts(allocator: *std.mem.Allocator) !struct { cfg: Config, data: [][]const u8 } {
         var zopts = ZOpts.init(allocator);
         defer zopts.deinit();
 
         var cfg = Config{};
 
+        // Define general information about the program
+        
         zopts.programName("grep");
         zopts.summary(
             \\An example "grep" program illustrating various option types as
             \\a means to show real usage of the ZOpts package.
         );
 
-        try zopts.flagDecl("context", 'C', &cfg.context, "NUM", "Number of lines of context to include (defaul$
+        // Declare any flags, providing names, descriptions, and binding to variables
+
+        try zopts.flagDecl("context", 'C', &cfg.context, "LINES", "Number of lines of context to include before and after a match (default is 3).");
         try zopts.flagDecl("ignore-case", 'i', &cfg.ignore_case, null, "Enable case insensitive search.");
         try zopts.flagDecl("color", null, &cfg.color, null, "Colorize the output (default is Auto).");
 
         var show_help = false;
-        try zopts.flagDecl("help", 'h', &show_help, null, "Display this help message");
+        try zopts.flagDecl("help", 'h', &show_help, null, "Display this help message.");
 
+        // Declare positional arguments, if any
+        
         try zopts.argDecl("PATTERN", &cfg.pattern, "Pattern to search on.");
         try zopts.extraDecl("[FILE]", &cfg.files, "Files to search. Omit for stdin.");
+
+        // Perform the parse; this will fill out the variables, or, in the case of 
+        // a parse error, print help information and exit the program.
 
         zopts.parseOrDie();
 
         if (show_help) {
             zopts.printHelpAndDie();
         }
+        
+        // Require a pattern from the user
+        if ( cfg.pattern == null ) {
+            zopts.setError("No pattern specified!");
+            zopts.printHelpAndDie();
+        }
 
+        // Any string data that was pulled in (for `cfg.pattern` and `cfg.files`)
+        // is allocated on the heap and owned by `zopts`. Therefore, it will be
+        // cleaned up by the call to `zopts.deinit()`. We want to pass this data
+        // back to the caller, so we use `zopts.toOwnedSlice()` to extricate it.
+        //
+        // (if zopts had been declared in `main` this wouldn't be needed)
         var result = .{
             .cfg = cfg,
             .data = zopts.toOwnedSlice(),
@@ -161,3 +202,22 @@ This can be implemented w/ ZOpts as follows:
         
         // Go about your business
     }
+
+# TODO
+
+Maybe instead of `toOwnedSlice()` to pass ownership, there can be a
+`dupe(*std.mem.Allocator)` function that makes copies of allocated flag values
+with the expectation that the caller is now responsible for their memory. For
+example:
+
+    var zopts = ZOpts.init(...);
+    defer zopts.deinit();
+    
+    var cfg: struct { 
+        arg0: ?[]const u8 = null, 
+        arg1: []const u8 = "whatever",
+    } = undefined;
+    
+    // ... all the parsing and junk ...
+    
+    try zopts.dupe();

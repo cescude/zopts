@@ -2,7 +2,7 @@
 const std = @import("std");
 
 const reflowText = @import("reflow_text.zig").reflowText;
-const FlagConverter = @import("flag_converters.zig").FlagConverter;
+const FlagConverter = @import("flag_converters.zig");
 
 const max_width: usize = 80;
 
@@ -36,7 +36,7 @@ const FlagDefinition = struct {
     long_name: ?[]const u8,
     short_name: ?u8,
     val_name: ?[]const u8,
-    description: []const u8,
+    description: ?[]const u8,
     // There's different parsing rules if this is a bool (flag) vs string
     // (option), namely that bools can omit an equals value, and can't be
     // assigned by a token in the next position.
@@ -47,14 +47,14 @@ const FlagDefinition = struct {
 };
 
 const PositionalDefinition = struct {
-    name: []const u8,
-    description: []const u8,
+    name: ?[]const u8,
+    description: ?[]const u8,
     conv: FlagConverter,
 };
 
 const ExtrasDefinition = struct {
-    name: []const u8,
-    description: []const u8,
+    name: ?[]const u8,
+    description: ?[]const u8,
     ptr: *[][]const u8,
 };
 
@@ -116,6 +116,8 @@ pub fn toOwnedSlice(self: *ZOpts) [][]const u8 {
     var allocator = self.allocator;
     var backing_data = self.values.toOwnedSlice();
 
+    // Make sure all our flags, args, and extras are represented
+
     self.flag_definitions.deinit();
     self.arg_definitions.deinit();
     if (self.last_error) |msg| {
@@ -134,19 +136,23 @@ pub fn printHelp(self: *ZOpts, writer: anytype) !void {
     if (self.program_name) |program_name| {
         try writer.print("usage: {s} ", .{program_name});
     } else {
-        try writer.print("usage: TODO ", .{});
+        try writer.print("usage: PROGRAM ", .{});
     }
 
     if (self.flag_definitions.items.len > 0) {
-        try writer.print("[OPTIONS]... ", .{});
+        try writer.print("[OPTIONS] ", .{});
     }
 
-    for (self.arg_definitions.items) |a| {
-        try writer.print("{s} ", .{a.name});
+    for (self.arg_definitions.items) |defn| {
+        try writer.print("{s} ", .{defn.name});
     }
 
     if (self.extras_definition) |defn| {
-        try writer.print("{s}...", .{defn.name});
+        if (defn.name) |n| {
+            try writer.print("{s}...", .{n});
+        } else {
+            try writer.print("ARGS...", .{});
+        }
     }
 
     try writer.print("\n", .{});
@@ -179,11 +185,11 @@ pub fn printHelp(self: *ZOpts, writer: anytype) !void {
     }
 
     for (self.arg_definitions.items) |arg_defn| {
-        try self.printArgUsage(arg_defn.name, arg_defn.description, writer);
+        try self.printArgUsage(arg_defn.name orelse "", arg_defn.description, writer);
     }
 
     if (self.extras_definition) |defn| {
-        try self.printArgUsage(defn.name, defn.description, writer);
+        try self.printArgUsage(defn.name orelse "", defn.description, writer);
     }
 }
 
@@ -213,7 +219,7 @@ fn specStringAlloc(allocator: *std.mem.Allocator, long_name: ?[]const u8, short_
     unreachable;
 }
 
-fn printArgUsage(self: *ZOpts, arg_name: []const u8, arg_desc: []const u8, writer: anytype) !void {
+fn printArgUsage(self: *ZOpts, arg_name: []const u8, arg_desc: ?[]const u8, writer: anytype) !void {
     try writer.print("   {s: <25} ", .{arg_name});
 
     // This is very unlikely, but...
@@ -221,17 +227,21 @@ fn printArgUsage(self: *ZOpts, arg_name: []const u8, arg_desc: []const u8, write
         try writer.print("\n" ++ " " ** 29, .{});
     }
 
-    var iter = reflowText(self.allocator, arg_desc, max_width - 29);
-    defer iter.deinit();
+    if (arg_desc) |description| {
+        var iter = reflowText(self.allocator, description, max_width - 29);
+        defer iter.deinit();
 
-    var first_line = true;
-    while (iter.next() catch null) |line| {
-        if (first_line) {
-            first_line = false;
-        } else {
-            try writer.print(" " ** 29, .{});
+        var first_line = true;
+        while (iter.next() catch null) |line| {
+            if (first_line) {
+                first_line = false;
+            } else {
+                try writer.print(" " ** 29, .{});
+            }
+            try writer.print("{s}\n", .{line});
         }
-        try writer.print("{s}\n", .{line});
+    } else {
+        try writer.print("\n", .{});
     }
 }
 
@@ -262,10 +272,10 @@ pub fn summary(self: *ZOpts, program_summary: []const u8) void {
 /// Boolean flags have slightly different parsing rules from
 /// string/value flags.
 pub fn flag(self: *ZOpts, comptime long_name: ?[]const u8, comptime short_name: ?u8, ptr: anytype) !void {
-    try self.flagDecl(long_name, short_name, ptr, null, "");
+    try self.flagDecl(long_name, short_name, ptr, null, null);
 }
 
-pub fn flagDecl(self: *ZOpts, comptime long_name: ?[]const u8, comptime short_name: ?u8, ptr: anytype, val_desc: ?[]const u8, description: []const u8) !void {
+pub fn flagDecl(self: *ZOpts, comptime long_name: ?[]const u8, comptime short_name: ?u8, ptr: anytype, val_desc: ?[]const u8, description: ?[]const u8) !void {
     if (long_name == null and short_name == null) {
         @compileError("Must provide at least one name to identify this flag");
     }
@@ -276,7 +286,7 @@ pub fn flagDecl(self: *ZOpts, comptime long_name: ?[]const u8, comptime short_na
     try self.flag_definitions.append(.{
         .long_name = long_name,
         .short_name = short_name,
-        .val_name = val_desc orelse conv.tag,
+        .val_name = val_desc orelse conv.tag orelse null,
         .description = description,
         .parse_type = if (is_bool) .Bool else .Str,
         .val_ptr = conv,
@@ -284,25 +294,27 @@ pub fn flagDecl(self: *ZOpts, comptime long_name: ?[]const u8, comptime short_na
 }
 
 pub fn arg(self: *ZOpts, ptr: anytype) !void {
-    try self.argDecl("", ptr, "");
+    try self.argDecl(null, ptr, null);
 }
 
-pub fn argDecl(self: *ZOpts, comptime arg_name: []const u8, ptr: anytype, comptime description: []const u8) !void {
+pub fn argDecl(self: *ZOpts, comptime arg_name: ?[]const u8, ptr: anytype, description: ?[]const u8) !void {
+    var conv = FlagConverter.init(ptr);
+
     try self.arg_definitions.append(.{
-        .name = arg_name, // TODO: Should we piggyback on conv.tag at all?
+        .name = if (arg_name != null) arg_name else conv.tag,
         .description = description,
-        .conv = FlagConverter.init(ptr),
+        .conv = conv,
     });
 }
 
 /// Name and bind the non-flag commandline arguments
 pub fn extra(self: *ZOpts, ptr: *[][]const u8) !void {
-    try self.extraDecl("", ptr, "");
+    try self.extraDecl(null, ptr, null);
 }
 
-pub fn extraDecl(self: *ZOpts, comptime extras_name: []const u8, ptr: *[][]const u8, comptime description: []const u8) !void {
+pub fn extraDecl(self: *ZOpts, comptime extras_name: ?[]const u8, ptr: *[][]const u8, description: ?[]const u8) !void {
     self.extras_definition = .{
-        .name = extras_name,
+        .name = extras_name orelse "STR",
         .description = description,
         .ptr = ptr,
     };
@@ -1076,7 +1088,36 @@ test "Using toOwnedSlice to parse in a function" {
     expectEqualStrings("four", opts.cfg.extras[1]);
 }
 
-test "Grep Example" {
+test "README: Grep Example (lazy)" {
+    var zopts = ZOpts.init(std.testing.allocator);
+    defer zopts.deinit();
+
+    var context: u32 = 3;
+    var ignore_case = false;
+    var color: enum { On, Off, Auto } = .Auto;
+
+    var pattern: ?[]const u8 = null;
+    var files: [][]const u8 = undefined;
+
+    try zopts.flag("context", 'C', &context);
+    try zopts.flag("ignore-case", 'i', &ignore_case);
+    try zopts.flag("color", null, &color);
+
+    var show_help = false;
+    try zopts.flag("help", 'h', &show_help);
+
+    try zopts.arg(&pattern);
+    try zopts.extra(&files);
+
+    var argv = [_][]const u8{"-h"};
+    try zopts.parseSlice(argv[0..]);
+
+    if (show_help) {
+        try zopts.printHelp(std.io.getStdErr().writer());
+    }
+}
+
+test "README: Grep Example (full)" {
     const Config = struct {
         context: u32 = 3,
         ignore_case: bool = false,
@@ -1099,7 +1140,10 @@ test "Grep Example" {
                 \\a means to show real usage of the ZOpts package.
             );
 
-            try zopts.flagDecl("context", 'C', &cfg.context, "NUM", "Number of lines of context to include (default is 3).");
+            try zopts.flagDecl("context", 'C', &cfg.context, "LINES",
+                \\Number of lines of context to include before and after
+                \\a match (default is 3).
+            );
             try zopts.flagDecl("ignore-case", 'i', &cfg.ignore_case, null, "Enable case insensitive search.");
             try zopts.flagDecl("color", null, &cfg.color, null, "Colorize the output (default is Auto).");
 
@@ -1109,12 +1153,15 @@ test "Grep Example" {
             try zopts.argDecl("PATTERN", &cfg.pattern, "Pattern to search on.");
             try zopts.extraDecl("[FILE]", &cfg.files, "Files to search. Omit for stdin.");
 
-            //zopts.parseOrDie();
             var argv = [_][]const u8{"-h"};
             try zopts.parseSlice(argv[0..]);
 
             if (show_help) {
-                zopts.printHelpAndDie();
+                var help_str = std.ArrayList(u8).init(std.testing.allocator);
+                defer help_str.deinit();
+
+                try zopts.printHelp(help_str.writer());
+                std.debug.print("\n{s}\n", .{help_str.items[0..]});
             }
 
             var result = .{

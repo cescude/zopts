@@ -28,143 +28,144 @@ fn truthValue(val: []const u8) !bool {
     return error.ParseError;
 }
 
-pub const FlagConverter = struct {
-    ptr: usize,
-    conv_fn: ConvFn,
-    tag: ?[]const u8,
+ptr: usize,
+conv_fn: ConvFn,
+tag: ?[]const u8,
 
-    const Self = @This();
+const FlagConverter = @This();
 
-    const ConvFn = fn (ptr: usize, value: []const u8) error{ParseError}!void;
+const ConvFn = fn (ptr: usize, value: []const u8) error{ParseError}!void;
+const SameStrFn = fn (ptr0: usize, value: []const u8) bool;
 
-    // T can be bool, or ?bool
-    fn _convertBool(comptime T: type, p: *T, value: []const u8) !void {
-        var v = p;
-        v.* = try truthValue(value);
-    }
+// T can be bool, or ?bool
+fn _convertBool(comptime T: type, p: *T, value: []const u8) !void {
+    var v = p;
+    v.* = try truthValue(value);
+}
 
-    // T can be []const u8, or ?[]const u8
-    fn _convertStr(comptime T: type, p: *T, value: []const u8) !void {
-        var v = p;
-        v.* = value;
-    }
+// T can be []const u8, or ?[]const u8
+fn _convertStr(comptime T: type, p: *T, value: []const u8) !void {
+    var v = p;
+    v.* = value;
+}
 
-    // T can be C, or ?C
-    fn _convertNum(comptime T: type, comptime C: type, p: *T, value: []const u8) !void {
-        var v = p;
-        const info = @typeInfo(C);
-        v.* = switch (info) {
-            .Int => switch (info.Int.signedness) {
-                .signed => std.fmt.parseInt(C, value, 10) catch return error.ParseError,
-                .unsigned => std.fmt.parseUnsigned(C, value, 10) catch return error.ParseError,
-            },
-            else => @compileError("Unsupported number type: " ++ @typeName(C)),
-        };
-    }
+// T can be C, or ?C
+fn _convertNum(comptime T: type, comptime C: type, p: *T, value: []const u8) !void {
+    var v = p;
+    const info = @typeInfo(C);
+    v.* = switch (info) {
+        .Int => switch (info.Int.signedness) {
+            .signed => std.fmt.parseInt(C, value, 10) catch return error.ParseError,
+            .unsigned => std.fmt.parseUnsigned(C, value, 10) catch return error.ParseError,
+        },
+        else => @compileError("Unsupported number type: " ++ @typeName(C)),
+    };
+}
 
-    fn _convertEnum(comptime T: type, comptime C: type, p: *T, value: []const u8) !void {
-        var v = p;
-        const info = @typeInfo(C);
-        switch (info) {
-            .Enum => {
-                inline for (info.Enum.fields) |field| {
-                    if (std.ascii.eqlIgnoreCase(field.name, value)) {
-                        v.* = @intToEnum(C, field.value);
-                        return;
-                    }
-                }
-
-                return error.ParseError;
-            },
-            else => unreachable,
-        }
-    }
-
-    fn joinedEnumSpace(comptime C: type) usize {
-        comptime {
-            const names = std.meta.fieldNames(C);
-            var sz: comptime_int = 0;
-            for (names) |name| {
-                sz += name.len;
-            }
-            // [one|two|three]
-            // [] (2) + 3 + || (3-1)
-            return sz + 2 + names.len - 1;
-        }
-    }
-
-    fn joinedEnumVals(comptime C: type) *const [joinedEnumSpace(C)]u8 {
-        comptime {
-            const names = std.meta.fieldNames(C);
-            var joined: [joinedEnumSpace(C)]u8 = undefined;
-            var offset = 0;
-
-            joined[offset] = '[';
-            offset += 1;
-
-            for (names) |name, idx| {
-                if (idx > 0) {
-                    joined[offset] = '|';
-                    offset += 1;
-                }
-
-                std.mem.copy(u8, joined[offset..], name);
-                offset += name.len;
-            }
-
-            joined[offset] = ']';
-
-            return &joined;
-        }
-    }
-
-    pub fn init(ptr: anytype) Self {
-        const T = @typeInfo(@TypeOf(ptr)).Pointer.child; // ptr must be a pointer!
-        const C: type = switch (@typeInfo(T)) {
-            .Optional => @typeInfo(T).Optional.child,
-            else => T,
-        };
-
-        const info = @typeInfo(C);
-
-        const impl = struct {
-            pub fn convert(p: usize, value: []const u8) error{ParseError}!void {
-                switch (info) {
-                    .Bool => try _convertBool(T, @intToPtr(*T, p), value),
-                    .Pointer => try _convertStr(T, @intToPtr(*T, p), value),
-                    .Int => try _convertNum(T, C, @intToPtr(*T, p), value),
-                    .Enum => try _convertEnum(T, C, @intToPtr(*T, p), value),
-                    else => @compileError("Unsupported type " ++ @typeName(T)),
+fn _convertEnum(comptime T: type, comptime C: type, p: *T, value: []const u8) !void {
+    var v = p;
+    const info = @typeInfo(C);
+    switch (info) {
+        .Enum => {
+            inline for (info.Enum.fields) |field| {
+                if (std.ascii.eqlIgnoreCase(field.name, value)) {
+                    v.* = @intToEnum(C, field.value);
+                    return;
                 }
             }
-        };
 
-        const can_convert: bool = switch (info) {
-            .Bool, .Int, .Enum => true,
-            // Only if it's a pointer to a []const u8
-            .Pointer => info.Pointer.size == .Slice and info.Pointer.is_const and info.Pointer.child == u8,
-            else => false,
-        };
+            return error.ParseError;
+        },
+        else => unreachable,
+    }
+}
 
-        if (!can_convert) {
-            @compileError("Unsupported type " ++ @typeName(T));
+fn joinedEnumSpace(comptime C: type) usize {
+    comptime {
+        const names = std.meta.fieldNames(C);
+        var sz: comptime_int = 0;
+        for (names) |name| {
+            sz += name.len;
+        }
+        // (one|two|three) is
+        //   onetwothree (11) +
+        //   () (2) +
+        //   || (3-1)
+        return sz + 2 + names.len - 1;
+    }
+}
+
+fn joinedEnumVals(comptime C: type) *const [joinedEnumSpace(C)]u8 {
+    comptime {
+        const names = std.meta.fieldNames(C);
+        var joined: [joinedEnumSpace(C)]u8 = undefined;
+        var offset = 0;
+
+        joined[offset] = '(';
+        offset += 1;
+
+        for (names) |name, idx| {
+            if (idx > 0) {
+                joined[offset] = '|';
+                offset += 1;
+            }
+
+            std.mem.copy(u8, joined[offset..], name);
+            offset += name.len;
         }
 
-        const short_tag = switch (info) {
-            .Bool => null,
-            .Int => "[num]",
-            .Pointer => "[str]",
-            .Enum => joinedEnumVals(C),
-            else => unreachable,
-        };
+        joined[offset] = ')';
 
-        return FlagConverter{
-            .ptr = @ptrToInt(ptr),
-            .conv_fn = impl.convert,
-            .tag = short_tag,
-        };
+        return &joined;
     }
-};
+}
+
+pub fn init(ptr: anytype) FlagConverter {
+    const T = @typeInfo(@TypeOf(ptr)).Pointer.child; // ptr must be a pointer!
+    const C: type = switch (@typeInfo(T)) {
+        .Optional => @typeInfo(T).Optional.child,
+        else => T,
+    };
+
+    const info = @typeInfo(C);
+
+    const impl = struct {
+        pub fn convert(p: usize, value: []const u8) error{ParseError}!void {
+            switch (info) {
+                .Bool => try _convertBool(T, @intToPtr(*T, p), value),
+                .Pointer => try _convertStr(T, @intToPtr(*T, p), value),
+                .Int => try _convertNum(T, C, @intToPtr(*T, p), value),
+                .Enum => try _convertEnum(T, C, @intToPtr(*T, p), value),
+                else => @compileError("Unsupported type " ++ @typeName(T)),
+            }
+        }
+    };
+
+    const can_convert: bool = switch (info) {
+        .Bool, .Int, .Enum => true,
+        // Only if it's a pointer to a []const u8
+        .Pointer => info.Pointer.size == .Slice and info.Pointer.is_const and info.Pointer.child == u8,
+        else => false,
+    };
+
+    if (!can_convert) {
+        @compileError("Unsupported type " ++ @typeName(T));
+    }
+
+    const short_tag = switch (info) {
+        .Bool => null,
+        .Int => "NUM",
+        .Pointer => "STR",
+        .Enum => joinedEnumVals(C),
+        else => unreachable,
+    };
+
+    return FlagConverter{
+        .ptr = @ptrToInt(ptr),
+        .conv_fn = impl.convert,
+        .tag = short_tag,
+    };
+}
 
 test "Typed/Generic flag conversion functionality" {
     var b0: bool = false;
@@ -217,13 +218,13 @@ test "Typed/Generic flag conversion functionality" {
 
     var en0: enum { Auto, Off, On } = .Auto;
     var en0c = FlagConverter.init(&en0);
-    expectEqualStrings("[Auto|Off|On]", en0c.tag.?);
+    expectEqualStrings("(Auto|Off|On)", en0c.tag.?);
     try en0c.conv_fn(en0c.ptr, "Off");
     expect(en0 == .Off);
 
     var en1: ?enum { Red, Green, Blue } = null;
     var en1c = FlagConverter.init(&en1);
-    expectEqualStrings("[Red|Green|Blue]", en1c.tag.?);
+    expectEqualStrings("(Red|Green|Blue)", en1c.tag.?);
     try en1c.conv_fn(en1c.ptr, "blue");
     expect(en1.? == .Blue);
 }
