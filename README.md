@@ -34,19 +34,19 @@ Basic setup & use:
 Declaring a boolean flag that defaults to false:
 
     var verbose: bool = false;
-    try opts.flag("verbose", 'v', &verbose);
+    try opts.flag(&verbose, "verbose", 'v');
     
 Declaring a string that defaults to "today":
 
     var day: []const u8 = "today";
-    try opts.flag("day", 'd', &day);
+    try opts.flag(&day, "day", 'd');
     
 Declaring a string that must be an enum, defaulting to "blue". Parsing will fail
 if something other than Red, Green, or Blue is supplied on the commandline
 (ignoring case):
 
     var color_choice: enum{Red,Green,Blue} = .Blue;
-    try opts.flag("color", 'c', &color_choice);
+    try opts.flag(&color_choice, "color", 'c');
     
 Declaring a number. Parsing will fail if the supplied number can't be
 represented properly (eg., more bits required, or a negative value to an
@@ -55,8 +55,8 @@ unsigned):
     var num_hats: u32 = 0;
     var distance: i8 = 0;
     
-    try opts.flag("num-hats", 'n', &num_hats);
-    try opts.flag("distance", 'd', &distance);
+    try opts.flag(&num_hats, "num-hats", 'n');
+    try opts.flag(&distance, "distance", 'd');
     
 Sometimes you don't have a suitable default, and need to detect if an option was
 omitted on the commandline. You can do this by making one of the above types
@@ -65,8 +65,8 @@ optional:
     var first_name: ?[]const u8 = null;
     var age: ?u8 = null;
     
-    try opts.flag("first-name", 'f', &first_name);
-    try opts.flag("age", 'a', &age);
+    try opts.flag(&first_name, "first-name", 'f');
+    try opts.flag(&age, "age", 'a');
 
     opts.parseOrDie();
 
@@ -98,8 +98,8 @@ printing usage information.
     var name: []const u8 = "";
     var file: []const u8 = "";
     
-    try opts.flagDecl("name", 'n', &name, "NAME", "Name of the user running a query");
-    try opts.argDecl("file", 'f', &file, "INPUT", "File name containing data");
+    try opts.flagDecl(&name, "name", 'n', "NAME", "Name of the user running a query");
+    try opts.argDecl(&file, "file", 'f', "INPUT", "File name containing data");
 
 ## Case example "grep"
 
