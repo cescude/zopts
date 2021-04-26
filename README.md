@@ -91,15 +91,17 @@ Capturing any extra positional arguments:
     var extra: [][]const u8 = undefined;
     try opts.extra(&extra);
 
-To provide extra information for the help string, use `flagDecl` and `argDecl`,
-rather than just `flag` or `arg` (respectively). This gives more context when
-printing usage information.
+To provide extra information for the help string, use `flagDecl`, `argDecl`, and
+`extraDecl`, rather than just `flag`, `arg`, or `extra` (respectively). This
+gives more context when printing usage information.
 
     var name: []const u8 = "";
     var file: []const u8 = "";
+    var colors: [][]const u8 = undefined;
     
     try opts.flagDecl(&name, "name", 'n', "NAME", "Name of the user running a query");
     try opts.argDecl(&file, "file", 'f', "INPUT", "File name containing data");
+    try opts.extraDecl(&colors, "[COLOR]", "List of color names");
 
 ## Case example "grep"
 
