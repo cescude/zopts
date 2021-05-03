@@ -55,7 +55,7 @@ const PositionalDefinition = struct {
 const ExtrasDefinition = struct {
     name: ?[]const u8,
     description: ?[]const u8,
-    ptr: *[][]const u8,
+    ptr: *[]const []const u8,
 };
 
 pub fn init(allocator: *std.mem.Allocator) ZOpts {
@@ -112,7 +112,7 @@ pub fn deinit(self: *ZOpts) void {
 ///
 ///         return result;
 ///     }
-pub fn toOwnedSlice(self: *ZOpts) [][]const u8 {
+pub fn toOwnedSlice(self: *ZOpts) []const []const u8 {
     var allocator = self.allocator;
     var backing_data = self.values.toOwnedSlice();
 
@@ -283,12 +283,13 @@ pub fn summary(self: *ZOpts, program_summary: []const u8) void {
 ///
 /// Boolean flags have slightly different parsing rules from
 /// string/value flags.
-pub fn flag(self: *ZOpts, ptr: anytype, comptime long_name: ?[]const u8, comptime short_name: ?u8) !void {
-    try self.flagDecl(ptr, long_name, short_name, null, null);
-}
-
-pub fn flagDecl(self: *ZOpts, ptr: anytype, comptime long_name: ?[]const u8, comptime short_name: ?u8, val_desc: ?[]const u8, description: ?[]const u8) !void {
-    if (long_name == null and short_name == null) {
+pub fn flag(self: *ZOpts, ptr: anytype, comptime opts: struct {
+    name: ?[]const u8 = null,
+    short: ?u8 = null,
+    placeholder: ?[]const u8 = null,
+    description: ?[]const u8 = null,
+}) !void {
+    if (opts.name == null and opts.short == null) {
         @compileError("Must provide at least one name to identify this flag");
     }
 
@@ -296,38 +297,35 @@ pub fn flagDecl(self: *ZOpts, ptr: anytype, comptime long_name: ?[]const u8, com
     const conv = FlagConverter.init(ptr);
 
     try self.flag_definitions.append(.{
-        .long_name = long_name,
-        .short_name = short_name,
-        .val_name = val_desc orelse conv.tag orelse null,
-        .description = description,
+        .long_name = opts.name,
+        .short_name = opts.short,
+        .val_name = opts.placeholder orelse conv.tag,
+        .description = opts.description,
         .parse_type = if (is_bool) .Bool else .Str,
         .val_ptr = conv,
     });
 }
 
-pub fn arg(self: *ZOpts, ptr: anytype) !void {
-    try self.argDecl(ptr, null, null);
-}
+const ArgOpt = struct {
+    placeholder: ?[]const u8 = null,
+    description: ?[]const u8 = null,
+};
 
-pub fn argDecl(self: *ZOpts, ptr: anytype, comptime arg_name: ?[]const u8, description: ?[]const u8) !void {
+pub fn arg(self: *ZOpts, ptr: anytype, comptime opts: ArgOpt) !void {
     var conv = FlagConverter.init(ptr);
 
     try self.arg_definitions.append(.{
-        .name = if (arg_name != null) arg_name else conv.tag,
-        .description = description,
+        .name = opts.placeholder orelse conv.tag,
+        .description = opts.description,
         .conv = conv,
     });
 }
 
 /// Name and bind the non-flag commandline arguments
-pub fn extra(self: *ZOpts, ptr: *[][]const u8) !void {
-    try self.extraDecl(ptr, null, null);
-}
-
-pub fn extraDecl(self: *ZOpts, ptr: *[][]const u8, comptime extras_name: ?[]const u8, description: ?[]const u8) !void {
+pub fn extra(self: *ZOpts, ptr: *[]const []const u8, comptime opts: ArgOpt) !void {
     self.extras_definition = .{
-        .name = extras_name orelse "STR",
-        .description = description,
+        .name = opts.placeholder orelse "STR",
+        .description = opts.description,
         .ptr = ptr,
     };
 }
@@ -364,7 +362,7 @@ const Action = enum {
     SkipNextToken,
 };
 
-pub fn parseSlice(self: *ZOpts, argv: [][]const u8) Error!void {
+pub fn parseSlice(self: *ZOpts, argv: []const []const u8) Error!void {
     var no_more_flags = false;
     var num_positionals: usize = 0;
     var extras_start_idx: ?usize = null;
@@ -448,7 +446,7 @@ fn addPositional(self: *ZOpts, value: []const u8, arg_idx: usize) !void {
     }
 }
 
-fn fillLongValue(self: *ZOpts, token: []const u8, remainder: [][]const u8) !Action {
+fn fillLongValue(self: *ZOpts, token: []const u8, remainder: []const []const u8) !Action {
     var flag_name = extractName(token);
     var defn: FlagDefinition = getFlagByLongName(self.flag_definitions.items, flag_name) orelse {
         try self.setError("Unrecognized option \"--{s}\"", .{flag_name});
@@ -511,7 +509,7 @@ fn fillLongValue(self: *ZOpts, token: []const u8, remainder: [][]const u8) !Acti
     return action_taken;
 }
 
-fn fillShortValue(self: *ZOpts, token: []const u8, remainder: [][]const u8) !Action {
+fn fillShortValue(self: *ZOpts, token: []const u8, remainder: []const []const u8) !Action {
     var flag_name = token[0];
     var defn: FlagDefinition = getFlagByShortName(self.flag_definitions.items, flag_name) orelse {
         try self.setError("Unrecognized option \"-{c}\"", .{flag_name});
@@ -594,7 +592,7 @@ fn extractEqualValue(token: []const u8) ?[]const u8 {
     }
 }
 
-fn extractNextValue(remainder: [][]const u8) ?[]const u8 {
+fn extractNextValue(remainder: []const []const u8) ?[]const u8 {
     if (remainder.len > 0 and !std.mem.startsWith(u8, remainder[0], "-")) {
         return remainder[0];
     } else {
@@ -641,17 +639,16 @@ test "anyflag" {
     var flag4: enum { One, Two, Three, Four } = .Three;
     var flag5: ?enum { Red, Orange, Yellow } = null;
 
-    try args.flag(&flag0, "flag0", null);
-    try args.flag(&flag1, "flag1", null);
-    try args.flag(&flag2, "flag2", null);
-    try args.flag(&flag3, "flag3", null);
-    try args.flag(&flag4, "flag4", null);
-    try args.flag(&flag5, "flag5", null);
+    try args.flag(&flag0, .{ .name = "flag0" });
+    try args.flag(&flag1, .{ .name = "flag1" });
+    try args.flag(&flag2, .{ .name = "flag2" });
+    try args.flag(&flag3, .{ .name = "flag3" });
+    try args.flag(&flag4, .{ .name = "flag4" });
+    try args.flag(&flag5, .{ .name = "flag5" });
 
-    var argv = [_][]const u8{
+    try args.parseSlice(&[_][]const u8{
         "--flag0=yes", "--flag1=1", "--flag2=pass", "--flag3=pass", "--flag4=two", "--flag5=YelloW",
-    };
-    try args.parseSlice(argv[0..]);
+    });
 
     expect(flag0 orelse false);
     expect(flag1);
@@ -670,10 +667,10 @@ test "Omitted flags get default values" {
     var flag2: ?[]const u8 = null;
     var flag3: ?[]const u8 = "default";
 
-    try args.flag(&flag0, "flag0", 'a');
-    try args.flag(&flag1, "flag1", 'b');
-    try args.flag(&flag2, "flag2", 'c');
-    try args.flag(&flag3, "flag3", 'd');
+    try args.flag(&flag0, .{ .name = "flag0", .short = 'a' });
+    try args.flag(&flag1, .{ .name = "flag1", .short = 'b' });
+    try args.flag(&flag2, .{ .name = "flag2", .short = 'c' });
+    try args.flag(&flag3, .{ .name = "flag3", .short = 'd' });
 
     var argv = [_][]const u8{};
     try args.parseSlice(argv[0..]);
@@ -693,10 +690,10 @@ test "Flags can be set" {
     var flag2: ?[]const u8 = null;
     var flag3: ?[]const u8 = "default";
 
-    try args.flag(&flag0, "flag0", 'a');
-    try args.flag(&flag1, "flag1", 'b');
-    try args.flag(&flag2, "flag2", 'c');
-    try args.flag(&flag3, "flag3", 'd');
+    try args.flag(&flag0, .{ .name = "flag0", .short = 'a' });
+    try args.flag(&flag1, .{ .name = "flag1", .short = 'b' });
+    try args.flag(&flag2, .{ .name = "flag2", .short = 'c' });
+    try args.flag(&flag3, .{ .name = "flag3", .short = 'd' });
 
     var argv = [_][]const u8{ "--flag0", "--flag1", "--flag2", "aaa", "--flag3", "bbb" };
     try args.parseSlice(argv[0..]);
@@ -727,8 +724,8 @@ test "Various ways to set a string value" {
     var flag_equal: ?[]const u8 = null;
     var flag_posn: ?[]const u8 = null;
 
-    try args.flag(&flag_equal, "flag_equal", 'a');
-    try args.flag(&flag_posn, "flag_posn", 'b');
+    try args.flag(&flag_equal, .{ .name = "flag_equal", .short = 'a' });
+    try args.flag(&flag_posn, .{ .name = "flag_posn", .short = 'b' });
 
     var argv = [_][]const u8{ "--flag_equal=aaa", "--flag_posn", "bbb" };
     try args.parseSlice(argv[0..]);
@@ -753,8 +750,8 @@ test "Expecting errors on bad input" {
     var flag0: ?bool = null;
     var flag1: ?[]const u8 = null;
 
-    try args.flag(&flag0, "flag0", 'a');
-    try args.flag(&flag1, "flag1", 'b');
+    try args.flag(&flag0, .{ .name = "flag0", .short = 'a' });
+    try args.flag(&flag1, .{ .name = "flag1", .short = 'b' });
 
     var argv = [_][]const u8{"--flag10=aaa"};
     expectError(error.ParseError, args.parseSlice(argv[0..]));
@@ -779,8 +776,8 @@ test "Missing string argument" {
     var miss0: ?[]const u8 = null;
     var miss1: []const u8 = "";
 
-    try args.flag(&miss0, "miss0", 'm');
-    try args.flag(&miss1, "miss1", 'n');
+    try args.flag(&miss0, .{ .name = "miss0", .short = 'm' });
+    try args.flag(&miss1, .{ .name = "miss1", .short = 'n' });
 
     // There's four codepaths for this error...
 
@@ -808,12 +805,12 @@ test "Various ways to set a boolean to true" {
     var flag_y: ?bool = null;
     var flag_1: ?bool = null;
 
-    try args.flag(&flag_basic, "flag_basic", 'a');
-    try args.flag(&flag_true, "flag_true", 'b');
-    try args.flag(&flag_yes, "flag_yes", 'c');
-    try args.flag(&flag_on, "flag_on", 'd');
-    try args.flag(&flag_y, "flag_y", 'e');
-    try args.flag(&flag_1, "flag_1", 'f');
+    try args.flag(&flag_basic, .{ .name = "flag_basic", .short = 'a' });
+    try args.flag(&flag_true, .{ .name = "flag_true", .short = 'b' });
+    try args.flag(&flag_yes, .{ .name = "flag_yes", .short = 'c' });
+    try args.flag(&flag_on, .{ .name = "flag_on", .short = 'd' });
+    try args.flag(&flag_y, .{ .name = "flag_y", .short = 'e' });
+    try args.flag(&flag_1, .{ .name = "flag_1", .short = 'f' });
 
     var argv = [_][]const u8{
         "--flag_basic", "--flag_true=true", "--flag_yes=yes",
@@ -857,12 +854,12 @@ test "Various ways to set a boolean to false" {
     var flag_y: ?bool = null;
     var flag_1: ?bool = null;
 
-    try args.flag(&flag_basic, "flag_basic", 'a');
-    try args.flag(&flag_true, "flag_true", 'b');
-    try args.flag(&flag_yes, "flag_yes", 'c');
-    try args.flag(&flag_on, "flag_on", 'd');
-    try args.flag(&flag_y, "flag_y", 'e');
-    try args.flag(&flag_1, "flag_1", 'f');
+    try args.flag(&flag_basic, .{ .name = "flag_basic", .short = 'a' });
+    try args.flag(&flag_true, .{ .name = "flag_true", .short = 'b' });
+    try args.flag(&flag_yes, .{ .name = "flag_yes", .short = 'c' });
+    try args.flag(&flag_on, .{ .name = "flag_on", .short = 'd' });
+    try args.flag(&flag_y, .{ .name = "flag_y", .short = 'e' });
+    try args.flag(&flag_1, .{ .name = "flag_1", .short = 'f' });
 
     var argv = [_][]const u8{
         "--flag_true=false", "--flag_yes=no",
@@ -910,15 +907,15 @@ test "Number support" {
     var flag6: i32 = 0;
     var flag7: ?i64 = null;
 
-    try args.flag(&flag0, "flag0", null);
-    try args.flag(&flag1, "flag1", null);
-    try args.flag(&flag2, "flag2", null);
-    try args.flag(&flag3, "flag3", null);
+    try args.flag(&flag0, .{ .name = "flag0" });
+    try args.flag(&flag1, .{ .name = "flag1" });
+    try args.flag(&flag2, .{ .name = "flag2" });
+    try args.flag(&flag3, .{ .name = "flag3" });
 
-    try args.flag(&flag4, "flag4", null);
-    try args.flag(&flag5, "flag5", null);
-    try args.flag(&flag6, "flag6", null);
-    try args.flag(&flag7, "flag7", null);
+    try args.flag(&flag4, .{ .name = "flag4" });
+    try args.flag(&flag5, .{ .name = "flag5" });
+    try args.flag(&flag6, .{ .name = "flag6" });
+    try args.flag(&flag7, .{ .name = "flag7" });
 
     var argv = [_][]const u8{
         "--flag0=1",  "--flag1=1", "--flag2=300000", "--flag3=300000",
@@ -954,18 +951,18 @@ test "Mashing together short opts" {
     var flag_h: ?bool = null;
     var flag_i: ?[]const u8 = null;
 
-    try args.flag(&flag_a, null, 'a');
-    try args.flag(&flag_b, null, 'b');
-    try args.flag(&flag_c, null, 'c');
+    try args.flag(&flag_a, .{ .short = 'a' });
+    try args.flag(&flag_b, .{ .short = 'b' });
+    try args.flag(&flag_c, .{ .short = 'c' });
 
-    try args.flag(&flag_d, null, 'd');
-    try args.flag(&flag_e, null, 'e');
+    try args.flag(&flag_d, .{ .short = 'd' });
+    try args.flag(&flag_e, .{ .short = 'e' });
 
-    try args.flag(&flag_f, null, 'f');
-    try args.flag(&flag_g, null, 'g');
+    try args.flag(&flag_f, .{ .short = 'f' });
+    try args.flag(&flag_g, .{ .short = 'g' });
 
-    try args.flag(&flag_h, null, 'h');
-    try args.flag(&flag_i, null, 'i');
+    try args.flag(&flag_h, .{ .short = 'h' });
+    try args.flag(&flag_i, .{ .short = 'i' });
 
     var argv = [_][]const u8{ "-abc=no", "-d=pass", "-e", "pass", "-fg=pass", "-hi", "pass" };
     try args.parseSlice(argv[0..]);
@@ -994,11 +991,11 @@ test "Positional functionality" {
     var arg1: ?u64 = null;
     var files: [][]const u8 = undefined;
 
-    try args.flag(&flag0, "flag0", null);
-    try args.flag(&flag1, "flag1", null);
-    try args.arg(&arg0);
-    try args.arg(&arg1);
-    try args.extra(&files);
+    try args.flag(&flag0, .{ .name = "flag0" });
+    try args.flag(&flag1, .{ .name = "flag1" });
+    try args.arg(&arg0, .{});
+    try args.arg(&arg1, .{});
+    try args.extra(&files, .{});
 
     var argv_missing = [_][]const u8{};
     try args.parseSlice(argv_missing[0..]);
@@ -1027,8 +1024,8 @@ test "Subcommand template" {
     var maybe_cmd: ?enum { Left, Right, Up, Down } = null;
     var extras: [][]const u8 = undefined;
 
-    try args.arg(&maybe_cmd);
-    try args.extra(&extras);
+    try args.arg(&maybe_cmd, .{});
+    try args.extra(&extras, .{});
 
     var argv = [_][]const u8{ "right", "--verbose" };
 
@@ -1044,7 +1041,7 @@ test "Subcommand template" {
             defer left_args.deinit();
 
             var verbose = false;
-            try left_args.flag(&verbose, "verbose", 'v');
+            try left_args.flag(&verbose, .{ .name = "verbose", .short = 'v' });
 
             try left_args.parseSlice(extras);
 
@@ -1063,18 +1060,17 @@ test "Using toOwnedSlice to parse in a function" {
     };
 
     const impl = struct {
-        pub fn getOpts() !struct { cfg: Config, data: [][]const u8 } {
+        pub fn getOpts() !struct { cfg: Config, data: []const []const u8 } {
             var zopts = ZOpts.init(std.testing.allocator);
             defer zopts.deinit();
 
             var cfg = Config{};
 
-            try zopts.flag(&cfg.arg0, "arg0", null);
-            try zopts.arg(&cfg.arg1);
-            try zopts.extra(&cfg.extras);
+            try zopts.flag(&cfg.arg0, .{ .name = "arg0", .short = null });
+            try zopts.arg(&cfg.arg1, .{});
+            try zopts.extra(&cfg.extras, .{});
 
-            var argv = [_][]const u8{ "--arg0=one", "two", "three", "four" };
-            try zopts.parseSlice(argv[0..]);
+            try zopts.parseSlice(&[_][]const u8{ "--arg0=one", "two", "three", "four" });
 
             var result = .{
                 .cfg = cfg,
@@ -1111,15 +1107,15 @@ test "README: Grep Example (lazy)" {
     var pattern: ?[]const u8 = null;
     var files: [][]const u8 = undefined;
 
-    try zopts.flag(&context, "context", 'C');
-    try zopts.flag(&ignore_case, "ignore-case", 'i');
-    try zopts.flag(&color, "color", null);
+    try zopts.flag(&context, .{ .name = "context", .short = 'C' });
+    try zopts.flag(&ignore_case, .{ .name = "ignore-case", .short = 'i' });
+    try zopts.flag(&color, .{ .name = "color" });
 
     var show_help = false;
-    try zopts.flag(&show_help, "help", 'h');
+    try zopts.flag(&show_help, .{ .name = "help", .short = 'h' });
 
-    try zopts.arg(&pattern);
-    try zopts.extra(&files);
+    try zopts.arg(&pattern, .{});
+    try zopts.extra(&files, .{});
 
     var argv = [_][]const u8{"-h"};
     try zopts.parseSlice(argv[0..]);
@@ -1140,7 +1136,7 @@ test "README: Grep Example (full)" {
     };
 
     const defs = struct {
-        pub fn parseOpts(allocator: *std.mem.Allocator) !struct { cfg: Config, data: [][]const u8 } {
+        pub fn parseOpts(allocator: *std.mem.Allocator) !struct { cfg: Config, data: []const []const u8 } {
             var zopts = ZOpts.init(allocator);
             defer zopts.deinit();
 
@@ -1152,18 +1148,15 @@ test "README: Grep Example (full)" {
                 \\a means to show real usage of the ZOpts package.
             );
 
-            try zopts.flagDecl(&cfg.context, "context", 'C', "LINES",
-                \\Number of lines of context to include before and after
-                \\a match (default is 3).
-            );
-            try zopts.flagDecl(&cfg.ignore_case, "ignore-case", 'i', null, "Enable case insensitive search.");
-            try zopts.flagDecl(&cfg.color, "color", null, null, "Colorize the output (default is Auto).");
+            try zopts.flag(&cfg.context, .{ .name = "context", .short = 'C', .placeholder = "LINES", .description = "Number of lines of context to include before and after a match (default is 3)." });
+            try zopts.flag(&cfg.ignore_case, .{ .name = "ignore-case", .short = 'i', .description = "Enable case insensitive search." });
+            try zopts.flag(&cfg.color, .{ .name = "color", .description = "Colorize the output (default is Auto)." });
 
             var show_help = false;
-            try zopts.flagDecl(&show_help, "help", 'h', null, "Display this help message");
+            try zopts.flag(&show_help, .{ .name = "help", .short = 'h', .description = "Display this help message" });
 
-            try zopts.argDecl(&cfg.pattern, "PATTERN", "Pattern to search on.");
-            try zopts.extraDecl(&cfg.files, "[FILE]", "Files to search. Omit for stdin.");
+            try zopts.arg(&cfg.pattern, .{ .placeholder = "PATTERN", .description = "Pattern to search on." });
+            try zopts.extra(&cfg.files, .{ .placeholder = "[FILE]", .description = "Files to search. Omit for stdin." });
 
             var argv = [_][]const u8{"-h"};
             try zopts.parseSlice(argv[0..]);

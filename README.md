@@ -34,19 +34,19 @@ Basic setup & use:
 Declaring a boolean flag that defaults to false:
 
     var verbose: bool = false;
-    try opts.flag(&verbose, "verbose", 'v');
+    try opts.flag(&verbose, .{ name = "verbose" });
     
 Declaring a string that defaults to "today":
 
     var day: []const u8 = "today";
-    try opts.flag(&day, "day", 'd');
+    try opts.flag(&day, .{ name = "day" });
     
 Declaring a string that must be an enum, defaulting to "blue". Parsing will fail
 if something other than Red, Green, or Blue is supplied on the commandline
 (ignoring case):
 
     var color_choice: enum{Red,Green,Blue} = .Blue;
-    try opts.flag(&color_choice, "color", 'c');
+    try opts.flag(&color_choice, .{ .name = "color" });
     
 Declaring a number. Parsing will fail if the supplied number can't be
 represented properly (eg., more bits required, or a negative value to an
@@ -55,8 +55,8 @@ unsigned):
     var num_hats: u32 = 0;
     var distance: i8 = 0;
     
-    try opts.flag(&num_hats, "num-hats", 'n');
-    try opts.flag(&distance, "distance", 'd');
+    try opts.flag(&num_hats, .{ .name = "num-hats" });
+    try opts.flag(&distance, .{ .name = "distance" });
     
 Sometimes you don't have a suitable default, and need to detect if an option was
 omitted on the commandline. You can do this by making one of the above types
@@ -65,8 +65,8 @@ optional:
     var first_name: ?[]const u8 = null;
     var age: ?u8 = null;
     
-    try opts.flag(&first_name, "first-name", 'f');
-    try opts.flag(&age, "age", 'a');
+    try opts.flag(&first_name, .{ .name = "first-name" });
+    try opts.flag(&age, .{ .name = "age" });
 
     opts.parseOrDie();
 
@@ -83,13 +83,13 @@ Declaring positional arguments:
     var pattern: []const u8 = "";
     var count: u32 = 0;
     
-    try opts.arg(&pattern);
-    try opts.arg(&count);
+    try opts.arg(&pattern, .{});
+    try opts.arg(&count, .{});
 
 Capturing any extra positional arguments:
 
     var extra: [][]const u8 = undefined;
-    try opts.extra(&extra);
+    try opts.extra(&extra, .{});
 
 To provide extra information for the help string, use `flagDecl`, `argDecl`, and
 `extraDecl`, rather than just `flag`, `arg`, or `extra` (respectively). This
@@ -99,9 +99,9 @@ gives more context when printing usage information.
     var file: []const u8 = "";
     var colors: [][]const u8 = undefined;
     
-    try opts.flagDecl(&name, "name", 'n', "NAME", "Name of the user running a query");
-    try opts.argDecl(&file, "file", 'f', "INPUT", "File name containing data");
-    try opts.extraDecl(&colors, "[COLOR]", "List of color names");
+    try opts.flag(&name, .{ .name = "name", .short = 'n', .placeholder = "NAME", .description = "Name of the user running a query" });
+    try opts.arg(&file, .{ .placeholder = "INPUT", .description = "File name containing data" });
+    try opts.extra(&colors, .{ .placeholder = "[COLOR]", .description = "List of color names" });
 
 ## Case example "grep"
 
@@ -150,17 +150,17 @@ This can be implemented w/ ZOpts as follows:
 
         // Declare any flags, providing names, descriptions, and binding to variables
 
-        try zopts.flagDecl("context", 'C', &cfg.context, "LINES", "Number of lines of context to include before and after a match (default is 3).");
-        try zopts.flagDecl("ignore-case", 'i', &cfg.ignore_case, null, "Enable case insensitive search.");
-        try zopts.flagDecl("color", null, &cfg.color, null, "Colorize the output (default is Auto).");
+        try zopts.flag(&cfg.context, .{ .name = "context", .short = 'C', .placeholder = "LINES", .description = "Number of lines of context to include before and after a match (default is 3)." });
+        try zopts.flag(&cfg.ignore_case,, .{ .name = "ignore-case", .short ='i', .description = "Enable case insensitive search." });
+        try zopts.flag(&cfg.color, .{ .name = "color", .description = "Colorize the output (default is Auto)." });
 
         var show_help = false;
-        try zopts.flagDecl("help", 'h', &show_help, null, "Display this help message.");
+        try zopts.flag(&show_help, .{ .name = "help", .short = 'h', .description = "Display this help message." });
 
         // Declare positional arguments, if any
         
-        try zopts.argDecl("PATTERN", &cfg.pattern, "Pattern to search on.");
-        try zopts.extraDecl("[FILE]", &cfg.files, "Files to search. Omit for stdin.");
+        try zopts.arg(&cfg.pattern, .{ .placeholder = "PATTERN", .description = "Pattern to search on." });
+        try zopts.extra(&cfg.files, .{ .placeholder = "[FILE]", .description = "Files to search. Omit for stdin." });
 
         // Perform the parse; this will fill out the variables, or, in the case of 
         // a parse error, print help information and exit the program.
