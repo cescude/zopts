@@ -164,32 +164,44 @@ pub fn printHelp(self: *ZOpts, writer: anytype) !void {
         while (iter.next() catch null) |line| {
             try writer.print("{s}\n", .{line});
         }
-    }
 
-    try writer.print("\n", .{});
+        try writer.print("\n", .{});
+    }
 
     if (self.flag_definitions.items.len > 0) {
         try writer.print("OPTIONS\n", .{});
+
+        for (self.flag_definitions.items) |defn| {
+            var spec_line = try specStringAlloc(self.allocator, defn.long_name, defn.short_name, defn.val_name);
+            defer self.allocator.free(spec_line);
+            try self.printArgUsage(spec_line, defn.description, writer);
+        }
+
+        try writer.print("\n", .{});
     }
 
-    for (self.flag_definitions.items) |defn| {
-        var spec_line = try specStringAlloc(self.allocator, defn.long_name, defn.short_name, defn.val_name);
-        defer self.allocator.free(spec_line);
-        try self.printArgUsage(spec_line, defn.description, writer);
-    }
+    var print_args_block = brk: {
+        for (self.arg_definitions.items) |defn| {
+            if (defn.description != null) break :brk true;
+        }
 
-    try writer.print("\n", .{});
+        break :brk self.extras_definition != null and self.extras_definition.?.description != null;
+    };
 
-    if (self.arg_definitions.items.len > 0) {
+    if (print_args_block) {
         try writer.print("ARGS\n", .{});
-    }
 
-    for (self.arg_definitions.items) |arg_defn| {
-        try self.printArgUsage(arg_defn.name orelse "", arg_defn.description, writer);
-    }
+        for (self.arg_definitions.items) |defn| {
+            if (defn.description) |desc| {
+                try self.printArgUsage(defn.name orelse "", desc, writer);
+            }
+        }
 
-    if (self.extras_definition) |defn| {
-        try self.printArgUsage(defn.name orelse "", defn.description, writer);
+        if (self.extras_definition) |defn| {
+            if (defn.description) |desc| {
+                try self.printArgUsage(defn.name orelse "", desc, writer);
+            }
+        }
     }
 }
 
