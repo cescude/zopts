@@ -144,7 +144,7 @@ This can be implemented w/ ZOpts as follows:
 
         // Define general information about the program
         
-        zopts.programName("grep");
+        zopts.name("grep");
         zopts.summary(
             \\An example "grep" program illustrating various option types as
             \\a means to show real usage of the ZOpts package.

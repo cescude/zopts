@@ -264,8 +264,8 @@ pub fn printHelpAndDie(self: *ZOpts) noreturn {
 }
 
 /// Configure the name for this program. This only affects "usage"
-/// output; TODO: if omitted, this will be taken from the first argv.
-pub fn programName(self: *ZOpts, program_name: []const u8) void {
+/// output
+pub fn name(self: *ZOpts, program_name: []const u8) void {
     self.program_name = program_name;
 }
 
@@ -1142,7 +1142,7 @@ test "README: Grep Example (full)" {
 
             var cfg = Config{};
 
-            zopts.programName("grep");
+            zopts.name("grep");
             zopts.summary(
                 \\An example "grep" program illustrating various option types as
                 \\a means to show real usage of the ZOpts package.
