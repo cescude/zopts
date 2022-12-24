@@ -34,8 +34,8 @@ tag: ?[]const u8,
 
 const FlagConverter = @This();
 
-const ConvFn = fn (ptr: usize, value: []const u8) error{ParseError}!void;
-const SameStrFn = fn (ptr0: usize, value: []const u8) bool;
+const ConvFn = *const fn (ptr: usize, value: []const u8) error{ParseError}!void;
+const SameStrFn = *const fn (ptr0: usize, value: []const u8) bool;
 
 // T can be bool, or ?bool
 fn _convertBool(comptime T: type, p: *T, value: []const u8) !void {
@@ -171,60 +171,60 @@ test "Typed/Generic flag conversion functionality" {
     var b0: bool = false;
     var b0c = FlagConverter.init(&b0);
     try b0c.conv_fn(b0c.ptr, "true");
-    expect(b0);
+    try expect(b0);
 
     var b1: ?bool = null;
     var b1c = FlagConverter.init(&b1);
     try b1c.conv_fn(b1c.ptr, "yes");
-    expect(b1.?);
+    try expect(b1.?);
     try b1c.conv_fn(b1c.ptr, "no");
-    expect(!b1.?);
+    try expect(!b1.?);
 
     var uu0: u15 = 0;
     var uu0c = FlagConverter.init(&uu0);
     try uu0c.conv_fn(uu0c.ptr, "12");
-    expect(uu0 == 12);
-    expectError(error.ParseError, uu0c.conv_fn(uu0c.ptr, "-12"));
-    expectError(error.ParseError, uu0c.conv_fn(uu0c.ptr, "7000000"));
+    try expect(uu0 == 12);
+    try expectError(error.ParseError, uu0c.conv_fn(uu0c.ptr, "-12"));
+    try expectError(error.ParseError, uu0c.conv_fn(uu0c.ptr, "7000000"));
 
     var uu1: ?u8 = null;
     var uu1c = FlagConverter.init(&uu1);
     try uu1c.conv_fn(uu1c.ptr, "12");
-    expect(uu1.? == 12);
-    expectError(error.ParseError, uu1c.conv_fn(uu1c.ptr, "-12"));
-    expectError(error.ParseError, uu1c.conv_fn(uu1c.ptr, "7000000"));
+    try expect(uu1.? == 12);
+    try expectError(error.ParseError, uu1c.conv_fn(uu1c.ptr, "-12"));
+    try expectError(error.ParseError, uu1c.conv_fn(uu1c.ptr, "7000000"));
 
     var ii0: i7 = 0;
     var ii0c = FlagConverter.init(&ii0);
     try ii0c.conv_fn(ii0c.ptr, "-60");
-    expect(ii0 == -60);
-    expectError(error.ParseError, ii0c.conv_fn(ii0c.ptr, "7000000"));
+    try expect(ii0 == -60);
+    try expectError(error.ParseError, ii0c.conv_fn(ii0c.ptr, "7000000"));
 
     var ii1: ?i7 = 0;
     var ii1c = FlagConverter.init(&ii1);
     try ii1c.conv_fn(ii1c.ptr, "-60");
-    expect(ii1.? == -60);
-    expectError(error.ParseError, ii1c.conv_fn(ii1c.ptr, "7000000"));
+    try expect(ii1.? == -60);
+    try expectError(error.ParseError, ii1c.conv_fn(ii1c.ptr, "7000000"));
 
     var str0: []const u8 = "";
     var str0c = FlagConverter.init(&str0);
     try str0c.conv_fn(str0c.ptr, "pass");
-    expectEqualStrings("pass", str0);
+    try expectEqualStrings("pass", str0);
 
     var str1: ?[]const u8 = null;
     var str1c = FlagConverter.init(&str1);
     try str1c.conv_fn(str1c.ptr, "pass");
-    expectEqualStrings("pass", str1.?);
+    try expectEqualStrings("pass", str1.?);
 
     var en0: enum { Auto, Off, On } = .Auto;
     var en0c = FlagConverter.init(&en0);
-    expectEqualStrings("(Auto|Off|On)", en0c.tag.?);
+    try expectEqualStrings("(Auto|Off|On)", en0c.tag.?);
     try en0c.conv_fn(en0c.ptr, "Off");
-    expect(en0 == .Off);
+    try expect(en0 == .Off);
 
     var en1: ?enum { Red, Green, Blue } = null;
     var en1c = FlagConverter.init(&en1);
-    expectEqualStrings("(Red|Green|Blue)", en1c.tag.?);
+    try expectEqualStrings("(Red|Green|Blue)", en1c.tag.?);
     try en1c.conv_fn(en1c.ptr, "blue");
-    expect(en1.? == .Blue);
+    try expect(en1.? == .Blue);
 }

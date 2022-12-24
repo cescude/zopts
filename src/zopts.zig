@@ -6,7 +6,7 @@ const FlagConverter = @import("flag_converters.zig");
 
 const max_width: usize = 80;
 
-allocator: *std.mem.Allocator,
+allocator: std.mem.Allocator,
 
 program_name: ?[]const u8 = null,
 program_summary: ?[]const u8 = null,
@@ -58,7 +58,7 @@ const ExtrasDefinition = struct {
     ptr: *[]const []const u8,
 };
 
-pub fn init(allocator: *std.mem.Allocator) ZOpts {
+pub fn init(allocator: std.mem.Allocator) ZOpts {
     return .{
         .allocator = allocator,
         .values = std.ArrayList([]const u8).init(allocator),
@@ -112,7 +112,7 @@ pub fn deinit(self: *ZOpts) void {
 ///
 ///         return result;
 ///     }
-pub fn toOwnedSlice(self: *ZOpts) []const []const u8 {
+pub fn toOwnedSlice(self: *ZOpts) ![]const []const u8 {
     var allocator = self.allocator;
     var backing_data = self.values.toOwnedSlice();
 
@@ -144,7 +144,7 @@ pub fn printHelp(self: *ZOpts, writer: anytype) !void {
     }
 
     for (self.arg_definitions.items) |defn| {
-        try writer.print("{s} ", .{defn.name});
+        try writer.print("{?s} ", .{defn.name});
     }
 
     if (self.extras_definition) |defn| {
@@ -205,7 +205,7 @@ pub fn printHelp(self: *ZOpts, writer: anytype) !void {
     }
 }
 
-fn specStringAlloc(allocator: *std.mem.Allocator, long_name: ?[]const u8, short_name: ?u8, maybe_val_name: ?[]const u8) ![]const u8 {
+fn specStringAlloc(allocator: std.mem.Allocator, long_name: ?[]const u8, short_name: ?u8, maybe_val_name: ?[]const u8) ![]const u8 {
     if (long_name == null and short_name == null) {
         unreachable;
     }
@@ -331,7 +331,7 @@ pub fn extra(self: *ZOpts, ptr: *[]const []const u8, comptime opts: ArgOpt) !voi
 }
 
 pub fn parseOrDie(self: *ZOpts) void {
-    self.parse() catch |_| self.printHelpAndDie();
+    self.parse() catch self.printHelpAndDie();
 }
 
 pub fn parse(self: *ZOpts) !void {
@@ -650,12 +650,12 @@ test "anyflag" {
         "--flag0=yes", "--flag1=1", "--flag2=pass", "--flag3=pass", "--flag4=two", "--flag5=YelloW",
     });
 
-    expect(flag0 orelse false);
-    expect(flag1);
-    expectEqualStrings("pass", flag2 orelse "fail");
-    expectEqualStrings("pass", flag3);
-    expect(flag4 == .Two);
-    expect(flag5.? == .Yellow);
+    try expect(flag0 orelse false);
+    try expect(flag1);
+    try expectEqualStrings("pass", flag2 orelse "fail");
+    try expectEqualStrings("pass", flag3);
+    try expect(flag4 == .Two);
+    try expect(flag5.? == .Yellow);
 }
 
 test "Omitted flags get default values" {
@@ -675,10 +675,10 @@ test "Omitted flags get default values" {
     var argv = [_][]const u8{};
     try args.parseSlice(argv[0..]);
 
-    expect(flag0 == null);
-    expect(flag1 orelse false);
-    expect(flag2 == null);
-    expectEqualStrings("default", flag3 orelse "fail");
+    try expect(flag0 == null);
+    try expect(flag1 orelse false);
+    try expect(flag2 == null);
+    try expectEqualStrings("default", flag3 orelse "fail");
 }
 
 test "Flags can be set" {
@@ -698,10 +698,10 @@ test "Flags can be set" {
     var argv = [_][]const u8{ "--flag0", "--flag1", "--flag2", "aaa", "--flag3", "bbb" };
     try args.parseSlice(argv[0..]);
 
-    expect(flag0 orelse false);
-    expect(flag1 orelse false);
-    expectEqualStrings("aaa", flag2 orelse "fail");
-    expectEqualStrings("bbb", flag3 orelse "fail");
+    try expect(flag0 orelse false);
+    try expect(flag1 orelse false);
+    try expectEqualStrings("aaa", flag2 orelse "fail");
+    try expectEqualStrings("bbb", flag3 orelse "fail");
 
     flag0 = null;
     flag1 = false;
@@ -711,10 +711,10 @@ test "Flags can be set" {
     argv = [_][]const u8{ "-a", "-b", "-c", "aaa", "-d", "bbb" };
     try args.parseSlice(argv[0..]);
 
-    expect(flag0 orelse false);
-    expect(flag1 orelse false);
-    expectEqualStrings("aaa", flag2 orelse "fail");
-    expectEqualStrings("bbb", flag3 orelse "fail");
+    try expect(flag0 orelse false);
+    try expect(flag1 orelse false);
+    try expectEqualStrings("aaa", flag2 orelse "fail");
+    try expectEqualStrings("bbb", flag3 orelse "fail");
 }
 
 test "Various ways to set a string value" {
@@ -730,8 +730,8 @@ test "Various ways to set a string value" {
     var argv = [_][]const u8{ "--flag_equal=aaa", "--flag_posn", "bbb" };
     try args.parseSlice(argv[0..]);
 
-    expectEqualStrings("aaa", flag_equal orelse "fail");
-    expectEqualStrings("bbb", flag_posn orelse "fail");
+    try expectEqualStrings("aaa", flag_equal orelse "fail");
+    try expectEqualStrings("bbb", flag_posn orelse "fail");
 
     flag_equal = null;
     flag_posn = null;
@@ -739,8 +739,8 @@ test "Various ways to set a string value" {
     argv = [_][]const u8{ "-a=aaa", "-b", "bbb" };
     try args.parseSlice(argv[0..]);
 
-    expectEqualStrings("aaa", flag_equal orelse "fail");
-    expectEqualStrings("bbb", flag_posn orelse "fail");
+    try expectEqualStrings("aaa", flag_equal orelse "fail");
+    try expectEqualStrings("bbb", flag_posn orelse "fail");
 }
 
 test "Expecting errors on bad input" {
@@ -754,19 +754,19 @@ test "Expecting errors on bad input" {
     try args.flag(&flag1, .{ .name = "flag1", .short = 'b' });
 
     var argv = [_][]const u8{"--flag10=aaa"};
-    expectError(error.ParseError, args.parseSlice(argv[0..]));
+    try expectError(error.ParseError, args.parseSlice(argv[0..]));
 
     argv = [_][]const u8{"-c"};
-    expectError(error.ParseError, args.parseSlice(argv[0..]));
+    try expectError(error.ParseError, args.parseSlice(argv[0..]));
 
     argv = [_][]const u8{"-ac"};
-    expectError(error.ParseError, args.parseSlice(argv[0..]));
+    try expectError(error.ParseError, args.parseSlice(argv[0..]));
 
     argv = [_][]const u8{"--flag0=not_right"};
-    expectError(error.ParseError, args.parseSlice(argv[0..]));
+    try expectError(error.ParseError, args.parseSlice(argv[0..]));
 
     argv = [_][]const u8{"positional_argument"};
-    expectError(error.ParseError, args.parseSlice(argv[0..]));
+    try expectError(error.ParseError, args.parseSlice(argv[0..]));
 }
 
 test "Missing string argument" {
@@ -782,16 +782,16 @@ test "Missing string argument" {
     // There's four codepaths for this error...
 
     var argv = [_][]const u8{"--miss0"};
-    expectError(error.ParseError, args.parseSlice(argv[0..]));
+    try expectError(error.ParseError, args.parseSlice(argv[0..]));
 
     argv = [_][]const u8{"--miss1"};
-    expectError(error.ParseError, args.parseSlice(argv[0..]));
+    try expectError(error.ParseError, args.parseSlice(argv[0..]));
 
     argv = [_][]const u8{"-m"};
-    expectError(error.ParseError, args.parseSlice(argv[0..]));
+    try expectError(error.ParseError, args.parseSlice(argv[0..]));
 
     argv = [_][]const u8{"-n"};
-    expectError(error.ParseError, args.parseSlice(argv[0..]));
+    try expectError(error.ParseError, args.parseSlice(argv[0..]));
 }
 
 test "Various ways to set a boolean to true" {
@@ -818,12 +818,12 @@ test "Various ways to set a boolean to true" {
     };
     try args.parseSlice(argv[0..]);
 
-    expect(flag_basic orelse false);
-    expect(flag_true orelse false);
-    expect(flag_yes orelse false);
-    expect(flag_on orelse false);
-    expect(flag_y orelse false);
-    expect(flag_1 orelse false);
+    try expect(flag_basic orelse false);
+    try expect(flag_true orelse false);
+    try expect(flag_yes orelse false);
+    try expect(flag_on orelse false);
+    try expect(flag_y orelse false);
+    try expect(flag_1 orelse false);
 
     flag_basic = null;
     flag_true = null;
@@ -835,12 +835,12 @@ test "Various ways to set a boolean to true" {
     argv = [_][]const u8{ "-a", "-b=true", "-c=yes", "-d=on", "-e=y", "-f=1" };
     try args.parseSlice(argv[0..]);
 
-    expect(flag_basic orelse false);
-    expect(flag_true orelse false);
-    expect(flag_yes orelse false);
-    expect(flag_on orelse false);
-    expect(flag_y orelse false);
-    expect(flag_1 orelse false);
+    try expect(flag_basic orelse false);
+    try expect(flag_true orelse false);
+    try expect(flag_yes orelse false);
+    try expect(flag_on orelse false);
+    try expect(flag_y orelse false);
+    try expect(flag_1 orelse false);
 }
 
 test "Various ways to set a boolean to false" {
@@ -868,12 +868,12 @@ test "Various ways to set a boolean to false" {
     };
     try args.parseSlice(argv[0..]);
 
-    expect(flag_basic == null);
-    expect(!flag_true.?);
-    expect(!flag_yes.?);
-    expect(!flag_on.?);
-    expect(!flag_y.?);
-    expect(!flag_1.?);
+    try expect(flag_basic == null);
+    try expect(!flag_true.?);
+    try expect(!flag_yes.?);
+    try expect(!flag_on.?);
+    try expect(!flag_y.?);
+    try expect(!flag_1.?);
 
     flag_basic = null;
     flag_true = null;
@@ -885,12 +885,12 @@ test "Various ways to set a boolean to false" {
     argv = [_][]const u8{ "-b=false", "-c=no", "-d=off", "-e=n", "-f=0" };
     try args.parseSlice(argv[0..]);
 
-    expect(flag_basic == null);
-    expect(!flag_true.?);
-    expect(!flag_yes.?);
-    expect(!flag_on.?);
-    expect(!flag_y.?);
-    expect(!flag_1.?);
+    try expect(flag_basic == null);
+    try expect(!flag_true.?);
+    try expect(!flag_yes.?);
+    try expect(!flag_on.?);
+    try expect(!flag_y.?);
+    try expect(!flag_1.?);
 }
 
 test "Number support" {
@@ -923,15 +923,15 @@ test "Number support" {
     };
     try args.parseSlice(argv[0..]);
 
-    expect(flag0 == 1);
-    expect(flag1.? == 1);
-    expect(flag2 == 300000);
-    expect(flag3.? == 300000);
+    try expect(flag0 == 1);
+    try expect(flag1.? == 1);
+    try expect(flag2 == 300000);
+    try expect(flag3.? == 300000);
 
-    expect(flag4 == -1);
-    expect(flag5.? == 1);
-    expect(flag6 == -20);
-    expect(flag7.? == -10000);
+    try expect(flag4 == -1);
+    try expect(flag5.? == 1);
+    try expect(flag6 == -20);
+    try expect(flag7.? == -10000);
 }
 
 test "Mashing together short opts" {
@@ -967,18 +967,18 @@ test "Mashing together short opts" {
     var argv = [_][]const u8{ "-abc=no", "-d=pass", "-e", "pass", "-fg=pass", "-hi", "pass" };
     try args.parseSlice(argv[0..]);
 
-    expect(flag_a.?);
-    expect(flag_b.?);
-    expect(!flag_c.?);
+    try expect(flag_a.?);
+    try expect(flag_b.?);
+    try expect(!flag_c.?);
 
-    expectEqualStrings("pass", flag_d.?);
-    expectEqualStrings("pass", flag_e.?);
+    try expectEqualStrings("pass", flag_d.?);
+    try expectEqualStrings("pass", flag_e.?);
 
-    expect(flag_f.?);
-    expectEqualStrings("pass", flag_g.?);
+    try expect(flag_f.?);
+    try expectEqualStrings("pass", flag_g.?);
 
-    expect(flag_h.?);
-    expectEqualStrings("pass", flag_i.?);
+    try expect(flag_h.?);
+    try expectEqualStrings("pass", flag_i.?);
 }
 
 test "Positional functionality" {
@@ -999,20 +999,20 @@ test "Positional functionality" {
 
     var argv_missing = [_][]const u8{};
     try args.parseSlice(argv_missing[0..]);
-    expect(arg0.len == 0);
-    expect(arg1 == null);
-    expect(files.len == 0);
+    try expect(arg0.len == 0);
+    try expect(arg1 == null);
+    try expect(files.len == 0);
 
     var argv = [_][]const u8{ "--flag0", "--flag1", "1234", "*.txt", "200000", "one.txt", "two.txt" };
     try args.parseSlice(argv[0..]);
 
-    expect(flag0);
-    expect(flag1 == 1234);
-    expectEqualStrings("*.txt", arg0);
-    expect(arg1.? == 200000);
-    expect(files.len == 2);
-    expectEqualStrings("one.txt", files[0]);
-    expectEqualStrings("two.txt", files[1]);
+    try expect(flag0);
+    try expect(flag1 == 1234);
+    try expectEqualStrings("*.txt", arg0);
+    try expect(arg1.? == 200000);
+    try expect(files.len == 2);
+    try expectEqualStrings("one.txt", files[0]);
+    try expectEqualStrings("two.txt", files[1]);
 }
 
 test "Subcommand template" {
@@ -1034,7 +1034,7 @@ test "Subcommand template" {
     if (maybe_cmd) |cmd| switch (cmd) {
         .Left, .Up, .Down => {
             // Would typically add code to handle these other cases here
-            expect(false);
+            try expect(false);
         },
         .Right => {
             var left_args = ZOpts.init(std.testing.allocator);
@@ -1045,10 +1045,10 @@ test "Subcommand template" {
 
             try left_args.parseSlice(extras);
 
-            expect(verbose);
+            try expect(verbose);
         },
     } else {
-        expect(false);
+        try expect(false);
     }
 }
 
@@ -1074,7 +1074,7 @@ test "Using toOwnedSlice to parse in a function" {
 
             var result = .{
                 .cfg = cfg,
-                .data = zopts.toOwnedSlice(),
+                .data = try zopts.toOwnedSlice(),
             };
 
             return result;
@@ -1089,11 +1089,11 @@ test "Using toOwnedSlice to parse in a function" {
         std.testing.allocator.free(opts.data);
     }
 
-    expectEqualStrings("one", opts.cfg.arg0);
-    expectEqualStrings("two", opts.cfg.arg1);
-    expect(opts.cfg.extras.len == 2);
-    expectEqualStrings("three", opts.cfg.extras[0]);
-    expectEqualStrings("four", opts.cfg.extras[1]);
+    try expectEqualStrings("one", opts.cfg.arg0);
+    try expectEqualStrings("two", opts.cfg.arg1);
+    try expect(opts.cfg.extras.len == 2);
+    try expectEqualStrings("three", opts.cfg.extras[0]);
+    try expectEqualStrings("four", opts.cfg.extras[1]);
 }
 
 test "README: Grep Example (lazy)" {
@@ -1136,7 +1136,7 @@ test "README: Grep Example (full)" {
     };
 
     const defs = struct {
-        pub fn parseOpts(allocator: *std.mem.Allocator) !struct { cfg: Config, data: []const []const u8 } {
+        pub fn parseOpts(allocator: std.mem.Allocator) !struct { cfg: Config, data: []const []const u8 } {
             var zopts = ZOpts.init(allocator);
             defer zopts.deinit();
 
@@ -1171,12 +1171,12 @@ test "README: Grep Example (full)" {
 
             var result = .{
                 .cfg = cfg,
-                .data = zopts.toOwnedSlice(),
+                .data = try zopts.toOwnedSlice(),
             };
 
             return result;
         }
     };
 
-    var opts = try defs.parseOpts(std.testing.allocator);
+    _ = try defs.parseOpts(std.testing.allocator);
 }

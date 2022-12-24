@@ -4,25 +4,25 @@ const expect = std.testing.expect;
 const expectEqualStrings = std.testing.expectEqualStrings;
 const expectError = std.testing.expectError;
 
-pub fn reflowText(a: *std.mem.Allocator, text: []const u8, width: usize) ReflowTextIterator {
+pub fn reflowText(a: std.mem.Allocator, text: []const u8, width: usize) ReflowTextIterator {
     return ReflowTextIterator.init(a, text, width);
 }
 
 /// Iterator that wraps text around the indicated column length;
 pub const ReflowTextIterator = struct {
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     current_line: std.ArrayList(u8),
-    token_iterator: std.mem.TokenIterator,
+    token_iterator: std.mem.TokenIterator(u8),
     width: usize,
     token: ?[]const u8,
 
     const Self = @This();
 
-    pub fn init(a: *std.mem.Allocator, text: []const u8, width: usize) Self {
+    pub fn init(a: std.mem.Allocator, text: []const u8, width: usize) Self {
         return .{
             .allocator = a,
             .current_line = std.ArrayList(u8).init(a),
-            .token_iterator = std.mem.tokenize(text, " \t\r\n"),
+            .token_iterator = std.mem.tokenize(u8, text, " \t\r\n"),
             .width = width,
             .token = null,
         };
@@ -76,6 +76,6 @@ test "Reflow paragraph text" {
     std.debug.print("\n", .{});
     while (try iter.next()) |line| {
         std.debug.print(">>{d: >5} {s}\n", .{ line.len, line });
-        expect(line.len <= 40);
+        try expect(line.len <= 40);
     }
 }
