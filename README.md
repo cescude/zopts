@@ -24,7 +24,7 @@ Basic setup & use:
     
     pub fn main() !void {
         var opts = ZOpts.init(std.heap.page_allocator);
-        opts.deinit();
+        defer opts.deinit();
         
         // Define flags/options here...
         
@@ -94,7 +94,7 @@ Capturing any extra positional arguments:
 To provide extra information for the help string, there's additional
 fields you can pass to the `.flag(...)` function (`.short`,
 `.placeholder`, and `.description`), as well as to `.arg(...)` and
-`.extra(...)` (`.placeholder` and `.desccription`). These give more
+`.extra(...)` (`.placeholder` and `.description`). These give more
 context when printing usage information.
 
     var name: []const u8 = "";
@@ -187,7 +187,7 @@ This can be implemented w/ ZOpts as follows:
         // (if zopts had been declared in `main` this wouldn't be needed)
         var result = .{
             .cfg = cfg,
-            .data = zopts.toOwnedSlice(),
+            .data = try zopts.toOwnedSlice(),
         };
 
         return result;
@@ -206,22 +206,3 @@ This can be implemented w/ ZOpts as follows:
         
         // Go about your business
     }
-
-# TODO
-
-Maybe instead of `toOwnedSlice()` to pass ownership, there can be a
-`dupe(*std.mem.Allocator)` function that makes copies of allocated flag values
-with the expectation that the caller is now responsible for their memory. For
-example:
-
-    var zopts = ZOpts.init(...);
-    defer zopts.deinit();
-    
-    var cfg: struct { 
-        arg0: ?[]const u8 = null, 
-        arg1: []const u8 = "whatever",
-    } = undefined;
-    
-    // ... all the parsing and junk ...
-    
-    try zopts.dupe();
