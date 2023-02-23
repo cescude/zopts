@@ -1,16 +1,22 @@
 const std = @import("std");
 
-pub fn build(b: *std.build.Builder) void {
-    // Standard release options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
-    const mode = b.standardReleaseOptions();
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
 
-    const lib = b.addStaticLibrary("zopts", "src/zopts.zig");
-    lib.setBuildMode(mode);
+    const lib = b.addStaticLibrary(.{
+        .name = "zopts",
+        .root_source_file = .{ .path = "src/zopts.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
     lib.install();
 
-    var main_tests = b.addTest("src/zopts.zig");
-    main_tests.setBuildMode(mode);
+    var main_tests = b.addTest(.{
+        .root_source_file = .{ .path = "src/zopts.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
 
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&main_tests.step);
